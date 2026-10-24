@@ -27,10 +27,12 @@ def main():
         manager = JobManager(folder, store=store, autostart=False, demo=True)
         manager.vpn = VPNManager(store, BrowserPremiumProvider() if args.premium else FakeProvider())
         if args.interactive:
-            state={'running':True,'state':'awaiting_verification','http_status':403,'width':1100,'height':760}
+            state={'running':True,'state':'off_task_page','can_return_to_results':True,'http_status':200,'width':1100,'height':760}
             image='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII='
             def browser_rpc(job_id,data):
-                if data['action']=='verify':state.update(state='ready',http_status=200)
+                if data['action']=='verify':
+                    if data.get('return_to_results') is True:state.update(state='awaiting_verification',can_return_to_results=False,http_status=200)
+                    elif not state['can_return_to_results']:state.update(state='ready',http_status=200)
                 if data['action']=='stop':return {'running':False,'state':'closed'}
                 return {**state,**({'image':image} if data['action']=='frame' else {})}
             manager._browser_rpc=browser_rpc

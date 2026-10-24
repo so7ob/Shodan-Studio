@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Opt-in real Chromium test in a separate, disconnected systemd namespace."""
 import argparse
+import base64
 import json
 import os
 from pathlib import Path
@@ -15,13 +16,57 @@ import uuid
 
 def inside(folder):
     from studio.browser_session import Session
-    s=Session(folder)
+    from studio.engine import build_url
+    from studio.worker import DemoData
+    target=build_url('fixture country:DE','ip')
+    login='https://account.shodan.io/login'
+    landing='https://www.shodan.io/dashboard'
+    class LoginFixture(Session):
+        """Fulfill synthetic HTTPS responses through CDP in the disconnected lab."""
+        def event(self,event):
+            if event.get('method')!='Fetch.requestPaused':return super().event(event)
+            p=event['params'];request=p['request'];url=request['url']
+            headers=[];status=200
+            if url==target:
+                cookie=next((str(v) for k,v in request.get('headers',{}).items() if k.lower()=='cookie'),'')
+                if 'studio_fixture=synthetic' in cookie:
+                    body=DemoData('fixture').fetch(target)
+                else:status=302;headers=[{'name':'Location','value':login}];body=''
+            elif url==login:
+                body='<html><body><form action="'+landing+'" method="GET"><button style="position:absolute;left:20px;top:20px;width:200px;height:60px">Synthetic sign in</button></form></body></html>'
+            elif url.rstrip('?')==landing:
+                body='<html><body>Synthetic account landing page; not facet results</body></html>'
+                headers=[{'name':'Set-Cookie','value':'studio_fixture=synthetic; Domain=.shodan.io; Path=/; Secure; HttpOnly; SameSite=Lax'}]
+            else:
+                self.cdp.send('Fetch.failRequest',{'requestId':p['requestId'],'errorReason':'BlockedByClient'},event.get('sessionId'),wait=False)
+                return
+            self.cdp.send('Fetch.fulfillRequest',{'requestId':p['requestId'],'responseCode':status,
+                'responseHeaders':headers+[{'name':'Content-Type','value':'text/html; charset=utf-8'}],
+                'body':base64.b64encode(body.encode()).decode()},event.get('sessionId'),wait=False)
+    def until(check):
+        deadline=time.monotonic()+8
+        while time.monotonic()<deadline:
+            if check():return
+            time.sleep(.1)
+        raise AssertionError('Synthetic browser transition timed out.')
+    s=LoginFixture(folder)
     try:
         s.call('Page.setDocumentContent',{'frameId':s.main_frame,'html':'<html><body><input id="field" aria-label="Fixture" style="position:absolute;left:20px;top:20px;width:200px;height:50px"><p>Synthetic offline fixture</p></body></html>'})
         s.action({'action':'click','x':70,'y':40});s.action({'action':'text','text':'fixture-text'})
         value=s.call('Runtime.evaluate',{'expression':'document.getElementById("field").value','returnByValue':True})['result']['value']
         assert value=='fixture-text'
         frame=s.action({'action':'frame'});assert frame['image'].startswith('data:image/jpeg;base64,')
+        # A real headed browser follows login/landing redirects, retains its
+        # synthetic HttpOnly cookie, and returns to the exact pending task URL.
+        s.navigate(target);until(lambda:s.document.get('url')==login)
+        until(lambda:s.html()['url']==login)
+        s.action({'action':'click','x':70,'y':40})
+        until(lambda:s.document.get('url','').rstrip('?')==landing)
+        until(lambda:s.html()['url'].rstrip('?')==landing)
+        for _ in range(6):assert s.action({'action':'verify'})['state']=='off_task_page'
+        s.action({'action':'verify','return_to_results':True})
+        until(lambda:s.verify()['state']=='ready')
+        assert s.expected==target and s.status()['can_return_to_results'] is False
         s.call('Page.navigate',{'url':'chrome://sandbox'})
         for _ in range(30):
             sandbox=s.call('Runtime.evaluate',{'expression':'document.body.innerText','returnByValue':True})['result'].get('value','')
@@ -38,7 +83,9 @@ def inside(folder):
         print(json.dumps(dict(real_chromium=True,headed_xvfb=True,manual_input_transport=True,
             frame_bytes=len(frame['image']),uid=os.getuid(),namespace_isolated=True,
             disconnected_namespace_leak_blocked=True,namespace_sandbox=True,seccomp_sandbox=True,
-            capabilities_zero=True,no_new_privileges=True,no_shodan_requests=True)))
+            capabilities_zero=True,no_new_privileges=True,no_shodan_requests=True,
+            synthetic_login_redirect=True,landing_page_blocked=True,
+            explicit_return_to_pending_facet=True,synthetic_cookie_retained=True)))
     finally:s.close()
 
 

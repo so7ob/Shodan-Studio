@@ -1,0 +1,88 @@
+{
+  "version": "1.4.1",
+  "job_id": "63d837ce5331009394884dc936273831",
+  "status": "running",
+  "task_ips": 94,
+  "demo": false,
+  "stats": {
+    "unique_ips": 94,
+    "source": "html",
+    "requests": 45,
+    "cache_hits": 24,
+    "completed_branches": 7,
+    "traversal_completed": false
+  },
+  "browser": {
+    "running": true,
+    "job_id": "63d837ce5331009394884dc936273831",
+    "profile_id": "9eb36ef2759355819a6301c9f2068f28",
+    "state": "ready"
+  },
+  "active_profile_unchanged": true,
+  "helper_pid": "380340",
+  "runtime_matches_checkout": true,
+  "recent_browser_events": [
+    {
+      "at": "2026-10-24T21:55:50.573246+00:00",
+      "action": "browser_verify",
+      "verified": true,
+      "status": "success"
+    },
+    {
+      "at": "2026-10-24T21:55:46.099492+00:00",
+      "action": "browser_return_to_results",
+      "verified": false,
+      "status": "success"
+    },
+    {
+      "at": "2026-10-24T21:54:59.536259+00:00",
+      "action": "browser_start",
+      "verified": false,
+      "status": "success"
+    },
+    {
+      "at": "2026-10-24T21:53:59.243251+00:00",
+      "action": "browser_stop",
+      "verified": false,
+      "status": "success"
+    },
+    {
+      "at": "2026-10-24T21:53:34.205490+00:00",
+      "action": "browser_verify",
+      "verified": false,
+      "status": "success"
+    },
+    {
+      "at": "2026-10-24T21:53:31.199458+00:00",
+      "action": "browser_start",
+      "verified": false,
+      "status": "success"
+    },
+    {
+      "at": "2026-10-24T21:52:19.525245+00:00",
+      "action": "browser_verify",
+      "verified": false,
+      "status": "success"
+    },
+    {
+      "at": "2026-10-24T21:52:14.014174+00:00",
+      "action": "browser_start",
+      "verified": false,
+      "status": "success"
+    },
+    {
+      "at": "2026-10-24T21:52:06.052115+00:00",
+      "action": "browser_start",
+      "verified": false,
+      "status": "success"
+    },
+    {
+      "at": "2026-10-24T21:45:30.151993+00:00",
+      "action": "browser_verify",
+      "verified": false,
+      "status": "success"
+    }
+  ],
+  "agent_did_not_log_in_or_resume": true,
+  "full_job_complete": false
+}

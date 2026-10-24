@@ -1,0 +1,15 @@
+{
+  "provider": "simulated",
+  "loginLandingBlocked": true,
+  "explicitReturn": true,
+  "keyboardReturn": true,
+  "manualInput": true,
+  "textCleared": true,
+  "verifiedResume": true,
+  "rtlWidths": [
+    375,
+    1280
+  ],
+  "axeViolations": 0,
+  "errors": []
+}

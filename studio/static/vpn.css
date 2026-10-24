@@ -11,6 +11,7 @@
 
 /* Uses the dashboard's existing RTL palette and native modal controls. */
 .browser-modal { width: min(96vw, 74rem); max-width: 74rem; }
+.browser-modal .modal-footer { flex-wrap: wrap; }
 .browser-screen { background: var(--bg); border: 1px solid var(--line); min-height: 8rem; overflow: hidden; }
 #browser-frame { width: 100%; height: auto; display: block; aspect-ratio: 1100/760; object-fit: contain; cursor: crosshair; }
 #browser-frame:focus-visible { outline: 2px solid var(--cyan); outline-offset: -2px; }

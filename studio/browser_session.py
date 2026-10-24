@@ -38,6 +38,12 @@ def facet_url(url):
     return q['query'][0],q['facet'][0]
 
 
+def same_facet(url, expected):
+    """Compare validated task URLs, allowing equivalent query encoding/order."""
+    try:return facet_url(url)==facet_url(expected)
+    except (ValueError,TypeError):return False
+
+
 class CDP:
     def __init__(self, process, read_fd, write_fd, event):
         self.process,self.read_fd,self.write_fd,self.event=process,read_fd,write_fd,event
@@ -110,7 +116,7 @@ def launch_chromium():
 class Session:
     def __init__(self, folder):
         self.folder=Path(folder);self.target=None;self.session=None;self.cdp=None;self.xvfb=None
-        self.document={};self.expected=None;self.ready=False
+        self.document={};self.expected=None;self.ready=False;self.page_url=''
         self.folder.mkdir(mode=0o700,parents=True,exist_ok=True)
         try:
             # Private X11 authentication, no TCP X server and no access-control bypass.
@@ -160,10 +166,15 @@ class Session:
             delay=parse_retry_after(headers.get('retry-after'))
             self.document={'url':r.get('url',''),'status':int(r['status']),'challenge':headers.get('cf-mitigated')=='challenge','frame':p.get('frameId'),
                            'retry_after':'unbounded' if delay is not None and not math.isfinite(delay) else delay}
+            self.page_url=r.get('url','')
+        elif method=='Network.requestWillBeSent' and p.get('type')=='Document' and event.get('sessionId')==self.session and p.get('frameId')==getattr(self,'main_frame',None):
+            self.ready=False;self.document={};self.page_url=p.get('request',{}).get('url','')
+        elif method=='Page.navigatedWithinDocument' and event.get('sessionId')==self.session and p.get('frameId')==getattr(self,'main_frame',None):
+            self.ready=False;self.page_url=p.get('url','')
         elif method=='Page.javascriptDialogOpening':self.call('Page.handleJavaScriptDialog',{'accept':False},wait=False)
 
     def navigate(self,url):
-        facet_url(url);self.expected=url;self.document={};self.ready=False
+        facet_url(url);self.expected=url;self.document={};self.ready=False;self.page_url=url
         result=self.call('Page.navigate',{'url':url})
         if result.get('errorText'):raise RuntimeError('[BROWSER_NETWORK] Browser navigation failed.')
         return self.status()
@@ -176,15 +187,22 @@ class Session:
 
     def status(self):
         doc=self.document
-        return {'running':True,'state':'browser_challenge' if doc.get('challenge') else 'rate_limited' if doc.get('status')==429 else 'access_denied' if doc.get('status') in (401,403) else 'ready' if self.ready else 'awaiting_verification',
-                'http_status':doc.get('status'),'host':urlsplit(doc.get('url','')).hostname or '', 'width':WIDTH,'height':HEIGHT}
+        current=getattr(self,'page_url','') or doc.get('url','')
+        off_task=bool(self.expected and current and not same_facet(current,self.expected))
+        return {'running':True,'state':'browser_challenge' if doc.get('challenge') else 'rate_limited' if doc.get('status')==429 else 'access_denied' if doc.get('status') in (401,403) else 'off_task_page' if off_task else 'ready' if self.ready else 'awaiting_verification',
+                'can_return_to_results':off_task,'http_status':doc.get('status'),'host':urlsplit(current).hostname or '', 'width':WIDTH,'height':HEIGHT}
 
-    def verify(self):
+    def verify(self, return_to_results=False):
         from .engine import parse_facet_html
         self.ready=False
-        result=self.status()
         page=self.html()
-        if not self.expected or page['url']!=self.expected or self.document.get('challenge') or self.document.get('status')!=200:return result
+        self.page_url=page['url']
+        # Explicit user action only. Keep the current tab, cookies, VPN and the
+        # exact pending facet selected by the worker; never accept a caller URL.
+        if return_to_results and self.expected and not same_facet(page['url'],self.expected):
+            return self.navigate(self.expected)
+        result=self.status()
+        if not same_facet(page['url'],self.expected) or not same_facet(self.document.get('url'),self.expected) or self.document.get('challenge') or self.document.get('status')!=200:return result
         query,facet=facet_url(self.expected)
         try:parse_facet_html(page['html'],facet,query)
         except Exception:return result
@@ -195,11 +213,11 @@ class Session:
         from .engine import http_failure
         from email.message import Message
         facet_url(url)
-        if self.expected!=url or self.verify()['state']!='ready':self.navigate(url)
+        if not same_facet(self.expected,url) or self.verify()['state']!='ready':self.navigate(url)
         deadline=time.monotonic()+25
         while time.monotonic()<deadline:
             doc=self.document
-            if doc.get('url')==url and doc.get('status',0)>=400:
+            if same_facet(doc.get('url'),url) and doc.get('status',0)>=400:
                 if doc['status']==429:
                     return {'http_status':429,'retry_after':doc.get('retry_after')}
                 headers=Message()
@@ -214,6 +232,8 @@ class Session:
         if op=='navigate' and set(data)=={'action','url'}:return self.navigate(data['url'])
         if op=='fetch' and set(data)=={'action','url'}:return self.fetch(data['url'])
         if op=='verify' and set(data)=={'action'}:return self.verify()
+        if op=='verify' and set(data)=={'action','return_to_results'} and data['return_to_results'] is True:
+            return self.verify(return_to_results=True)
         if op=='frame' and set(data)=={'action'}:
             for attempt in range(3):
                 try:

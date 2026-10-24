@@ -6,7 +6,7 @@ import threading
 import time
 import unittest
 from unittest.mock import MagicMock,patch
-from studio.browser_session import Session,allowed_url,facet_url
+from studio.browser_session import Session,allowed_url,facet_url,same_facet
 from studio.browser_broker import BrowserBroker,BrowserPipeError
 from studio.vpn_helper import Broker
 from studio.engine import build_url
@@ -67,6 +67,54 @@ class BoundaryTests(unittest.TestCase):
         s.call.return_value={'result':{'value':json.dumps({'url':URL,'html':'<html>Challenge</html>'})}}
         for _ in range(6):self.assertEqual(s.verify()['state'],'browser_challenge')
         self.assertEqual([c.args[0] for c in s.call.call_args_list],['Runtime.evaluate']*6)
+    def test_login_landing_page_requires_explicit_return_to_pending_facet(self):
+        s=self.session();pending=build_url('fixture country:DE','org');s.expected=pending
+        landing='https://account.shodan.io/?private=not-for-api'
+        s.document={'url':landing,'status':200};s.html=lambda:{'url':landing,'html':'<html>Account private fixture</html>'}
+        for _ in range(6):
+            result=s.action({'action':'verify'})
+            self.assertEqual(result['state'],'off_task_page');self.assertTrue(result['can_return_to_results'])
+            self.assertNotIn('private',json.dumps(result))
+        s.call.assert_not_called()
+        result=s.action({'action':'verify','return_to_results':True})
+        s.call.assert_called_once_with('Page.navigate',{'url':pending})
+        self.assertEqual(s.expected,pending);self.assertNotEqual(result['state'],'ready')
+        self.assertFalse(result['can_return_to_results']);s.cdp.send.assert_not_called()
+        s.document={'url':pending,'status':200};s.html=lambda:{'url':pending,'html':DemoData('fixture').fetch(pending)}
+        self.assertEqual(s.verify()['state'],'ready')
+    def test_return_cannot_accept_external_url_or_truthy_input(self):
+        s=self.session()
+        for extra in ({'return_to_results':'true'},{'return_to_results':1},{'return_to_results':False},{'return_to_results':True,'url':URL}):
+            with self.assertRaises(ValueError):s.action({'action':'verify',**extra})
+        s.call.assert_not_called()
+    def test_return_on_existing_results_only_verifies_without_reload(self):
+        s=self.session();s.document={'url':URL,'status':200};s.html=lambda:{'url':URL,'html':DemoData('fixture').fetch(URL)}
+        self.assertEqual(s.action({'action':'verify','return_to_results':True})['state'],'ready')
+        s.call.assert_not_called()
+    def test_equivalent_query_encoding_is_accepted_but_different_facet_is_not(self):
+        s=self.session();s.expected=build_url('fixture country:DE','ip')
+        equivalent='https://www.shodan.io/search/facet?facet=ip&query=fixture%20country%3ADE'
+        self.assertTrue(same_facet(equivalent,s.expected))
+        s.document={'url':equivalent,'status':200};s.html=lambda:{'url':equivalent,'html':DemoData('fixture').fetch(equivalent)}
+        self.assertEqual(s.verify()['state'],'ready')
+        for url in [build_url('fixture country:US','ip'),build_url('fixture country:DE','org'),equivalent+'&query=extra',equivalent.replace('www.shodan.io','account.shodan.io')]:
+            self.assertFalse(same_facet(url,s.expected))
+    def test_new_navigation_and_same_document_redirect_invalidate_ready(self):
+        s=self.session();s.ready=True;s.document={'url':URL,'status':200}
+        s.event({'method':'Page.navigatedWithinDocument','sessionId':'session','params':{'frameId':'main','url':'https://www.shodan.io/'}})
+        self.assertEqual(s.status()['state'],'off_task_page');self.assertFalse(s.ready)
+        s.event({'method':'Network.requestWillBeSent','sessionId':'session','params':{'type':'Document','frameId':'main','request':{'url':URL}}})
+        self.assertFalse(s.document);self.assertEqual(s.status()['state'],'awaiting_verification')
+        # A prior account HTTP 200 must not authorize a newly loading task page.
+        s.document={'url':'https://account.shodan.io/','status':200};s.html=lambda:{'url':URL,'html':DemoData('fixture').fetch(URL)}
+        self.assertNotEqual(s.verify()['state'],'ready')
+    def test_return_then_source_denial_never_enables_resume(self):
+        for status,challenge,state in [(403,True,'browser_challenge'),(429,False,'rate_limited'),(403,False,'access_denied')]:
+            s=self.session();s.document={'url':'https://www.shodan.io/','status':200}
+            s.html=lambda:{'url':'https://www.shodan.io/','html':'home'}
+            s.action({'action':'verify','return_to_results':True})
+            s.document={'url':URL,'status':status,'challenge':challenge};s.html=lambda:{'url':URL,'html':'denied'}
+            self.assertEqual(s.verify()['state'],state);self.assertFalse(s.ready)
     def test_request_filter_and_popups_are_closed(self):
         s=self.session()
         s.event({'method':'Fetch.requestPaused','sessionId':'session','params':{'requestId':'1','request':{'url':'http://169.254.169.254/'}}})
@@ -138,6 +186,15 @@ class ManagerTests(unittest.TestCase):
             manager.browser_action(self.job['id'],{'action':'start'})
             manager.browser_action(self.job['id'],{'action':'text','text':'private-password'})
         self.assertNotIn('private-password',json.dumps(manager.vpn.events()))
+    def test_return_is_audited_and_does_not_resume_or_change_lease(self):
+        self.manager._browser_job=self.job['id']
+        payload={'action':'verify','return_to_results':True}
+        with patch.object(self.manager,'_browser_rpc',return_value={'state':'awaiting_verification'}) as rpc:
+            self.manager.browser_action(self.job['id'],payload)
+            rpc.assert_called_once_with(self.job['id'],payload)
+        self.assertEqual(self.manager._browser_job,self.job['id'])
+        self.assertEqual(self.manager.store.get_job(self.job['id'])['status'],'paused')
+        self.assertIn('browser_return_to_results',json.dumps(self.manager.vpn.events()))
     def test_browser_actions_require_auth_and_csrf(self):
         app=create_app(self.tmp.name,manager=self.manager,autostart=False,demo=True);client=Client(app)
         url='/api/jobs/'+self.job['id']+'/browser'

@@ -1,0 +1,18 @@
+{
+  "real_chromium": true,
+  "headed_xvfb": true,
+  "manual_input_transport": true,
+  "frame_bytes": 10863,
+  "uid": 995,
+  "namespace_isolated": true,
+  "disconnected_namespace_leak_blocked": true,
+  "namespace_sandbox": true,
+  "seccomp_sandbox": true,
+  "capabilities_zero": true,
+  "no_new_privileges": true,
+  "no_shodan_requests": true,
+  "synthetic_login_redirect": true,
+  "landing_page_blocked": true,
+  "explicit_return_to_pending_facet": true,
+  "synthetic_cookie_retained": true
+}

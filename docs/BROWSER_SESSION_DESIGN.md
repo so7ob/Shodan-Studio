@@ -28,6 +28,17 @@ page again before resume. Profiles may persist. Missing Chromium,
 sandbox failure, lost tunnel, expired session or unavailable source fails closed.
 Data and checkpoint formats remain compatible; this requires no database migration.
 
+Login redirects can leave the current tab on an account/home page. Version 1.4.1
+reports `off_task_page` and offers an explicit return button. The existing `verify`
+RPC accepts the exact optional pair `return_to_results: true`; the child uses its
+server-owned pending facet URL, never a caller-supplied URL. Ordinary verification
+and frame polling stay read-only. Returning does not enable resume: the current
+document and its main-frame HTTP response must match the expected query/facet,
+return HTTP 200 without a challenge, and pass the facet parser. Equivalent query
+parameter order/encoding is accepted; different queries, facets and endpoints are
+not. Navigation invalidates readiness. No helper protocol allowlist expansion,
+VPN switch, profile replacement or database migration is needed for this fix.
+
 Real challenge acceptance requires the user. Offline and local browser tests can
 prove transport, controls, security and checkpoint behavior, not Shodan consent.
 Cloudflare documents production challenges as unsupported in automated browsers;

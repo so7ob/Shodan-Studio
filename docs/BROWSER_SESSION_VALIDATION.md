@@ -1,4 +1,39 @@
-# Browser session acceptance — 1.4.0
+# Browser session acceptance
+
+## Login redirect correction — 1.4.1 (2026-10-25 Asia/Aden)
+
+The old verification required the exact facet URL but provided no way back after
+login redirected to a home/account page. The new explicit return button keeps
+the current tab, profile and VPN, navigates only to the server-owned pending
+facet, and requires a separate successful page check before resume. Ordinary
+verification still never navigates. Equivalent query encoding/order is accepted
+without accepting a different query, facet, host or endpoint.
+
+| Evidence | Result |
+| --- | --- |
+| [Automated checks](vpn-evidence/browser-login-return-tests.txt) | **192 Python tests** passed in 69.290 s; **11 JS tests** passed; JS syntax and installer checks passed |
+| [Native browser](vpn-evidence/browser-login-return-native.json) | Real Chromium followed synthetic HTTPS login redirects, kept a synthetic HttpOnly session cookie, rejected the landing page and parsed the pending facet after explicit return; no Shodan requests; sandbox and disconnected-network checks passed |
+| [UI acceptance](vpn-evidence/browser-login-return-ui.json) | Landing-page rejection, explicit keyboard return, separate verification, private input clearing, 375/1280 RTL, zero axe violations; all four footer controls fit inside the dialog |
+| [Deployment](vpn-evidence/browser-login-return-deployment.json) | 1.4.1 healthy; **4 jobs / 823 IPs / 1 user** retained at update, unchanged job files and schema 1; restored backup SQLite checked; helper not restarted and host network/SSH unchanged |
+| [Live observation](vpn-evidence/browser-login-return-live.json) | User invoked return at **21:55:46 UTC**, then successful verification at **21:55:50 UTC**; extraction running with **94 real task IPs**, up from 73 at maintenance; existing worker profile and helper PID retained; checked runtime source matches checkout |
+
+The agent did not enter credentials, solve challenges or resume the live job.
+The attempted separate live probe stopped at its busy-worker guard; the user had
+already resumed. The subsequent evidence is read-only status/audit/SQLite data.
+This proves a live return/verify/resume sequence, not a finished extraction or
+immunity from future HTTP 403/429 responses.
+
+For this fix, code rollback targets the pre-fix 1.4.0 release
+`/opt/shodan-studio/releases/release-72lQCVjt`. Pause at a checkpoint, close the
+browser to flush its private profile, stop only the web service, take a fresh
+data/profile backup, point `current` to that release and start the web service.
+Keep the existing data: there is no schema change and later results must not be
+overwritten by an older backup. The pre-fix private backup is
+`/var/backups/shodan-studio/pre-login-return-20261024-215407.tar.gz`; the final
+maintenance backup is recorded in the deployment evidence. The helper/tunnel
+does not need restarting for this code rollback.
+
+## Original feature acceptance — 1.4.0
 
 Tested on Debian 12 / Python 3.11.2 / Chromium 156.0.8078.47, on 2026-10-25
 (Asia/Aden; deployment timestamps are UTC). This extends Issue #4 / the VPN

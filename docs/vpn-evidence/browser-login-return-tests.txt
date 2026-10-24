@@ -1,0 +1,8 @@
+Debian 12 / Python 3.11
+
+Ran 192 tests in 69.290s
+
+OK
+
+Node IP progress: 11 passed, 0 failed.
+JavaScript syntax and all three installer --check commands: passed.

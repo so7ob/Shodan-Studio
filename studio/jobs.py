@@ -401,7 +401,8 @@ class JobManager:
                     self._browser_job=None
             if action!='frame':self._browser_deadline=time.monotonic()+1800
             if action in {'start','stop','verify'}:
-                self.vpn.audit('browser_'+action,job_id=job_id,verified=result.get('state')=='ready')
+                audit_action='return_to_results' if action=='verify' and payload.get('return_to_results') is True else action
+                self.vpn.audit('browser_'+audit_action,job_id=job_id,verified=result.get('state')=='ready')
             return result
         return self._vpn_mutation(operation)
 
