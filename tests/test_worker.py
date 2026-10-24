@@ -26,7 +26,7 @@ class WorkerRecoveryTests(unittest.TestCase):
         self.job_dir.mkdir()
         self.job, _ = validate_job({
             "title": "Synthetic worker-recovery fixture", "query": 'http.component:"php" country:"EG"',
-            "mode": "api", "settings": {"demo": True, "transport": "python", "delay": 0,
+            "mode": "api", "settings": {"strategy": "priority", "demo": True, "transport": "python", "delay": 0,
                 "max_requests": 25, "api_fallback": "html", "rate_limit_retries": 0,
                 "on_rate_limit": "pause", "max_retry_wait": 0, "retry_base_delay": 1},
         }, allow_demo=True)

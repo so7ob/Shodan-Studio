@@ -1,4 +1,4 @@
-# Shodan Studio 1.1.0 — architecture
+# Shodan Studio 1.5.0 — architecture
 
 This release is a self-hosted, single-user application for Debian 12 and a trusted
 local network or an SSH tunnel. It uses Python's standard library, SQLite and a
@@ -13,7 +13,8 @@ multi-tenant service.
 | `studio/store.py` | SQLite WAL, atomic queue claims, events, password/session hashing |
 | `studio/jobs.py` | One-worker scheduler, typed actions, memory-only keys, exports and checkpoint import |
 | `studio/worker.py` | Isolated process adapting the collection engine into structured events and controls |
-| `studio/engine.py` | ShodanSpider 7.1.0 source-resume engine, unchanged from its standalone release |
+| `studio/engine.py` | ShodanSpider source-resume core and legacy traversal |
+| `studio/adaptive.py` | Bounded cost-based partition selection, direct IP probing and deterministic cache replay |
 | `studio/config.py` | Job schema and range validation; no shell parsing |
 | `studio/static/` | Browser interface; same-origin JSON polling every two seconds |
 | `deploy/` | Unprivileged systemd service |
@@ -167,3 +168,5 @@ Connection verification retries the same tunnel at most three times. Account and
 protocol failures stop failover, as do destination-only failures on a healthy
 tunnel. Dashboard reads during the helper's periodic probe return unverified
 busy status immediately. No database schema change is required beyond VPN v1.
+
+Adaptive planning and legacy checkpoint boundaries are described in [the planner design](docs/ADAPTIVE_PLANNER.md) and [the Arabic operations guide](docs/ADAPTIVE_PLANNER_AR.md).

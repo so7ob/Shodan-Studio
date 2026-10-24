@@ -37,7 +37,7 @@ def emit(kind: str, **fields) -> None:
 
 def build_args(job_dir: Path, job: dict, key: str | None):
     """Construct a fixed CLI argument vector; shell syntax is never evaluated."""
-    cfg = settings_from(job["settings"], allow_demo=True)
+    cfg = settings_from({"strategy": "priority", **job["settings"]}, allow_demo=True)
     checkpoint = job_dir / "checkpoint.json"
     argv = ["--mode", job["mode"], "--save-partial", "--on-source-error", "pause"]
     if checkpoint.exists():
@@ -93,27 +93,22 @@ class DemoData:
         self.country = next((v[0] for _, _, v, neg in fields.get("country", []) if not neg and len(v) == 1), "EG")
 
     def values(self, query: str, facet: str):
+        from collections import Counter
         fields = engine.scope_filters(query)
-        def chosen(name):
-            return next((v[0].casefold() for _, _, v, neg in fields.get(name, []) if not neg and len(v) == 1), "")
-        city, asn, port = chosen("city"), chosen("asn"), chosen("port")
-        if facet == "country":
-            return [(self.country, 292)], 292
-        if facet == "city":
-            return [("Cairo", 194), ("Giza", 98)], 292
-        if facet == "asn" and city == "cairo":
-            return [("AS8452", 140), ("AS24863", 54)], 194
-        if facet == "port" and asn == "as8452":
-            return [("443", 51), ("8080", 49), ("80", 40)], 140
-        if facet == "ip":
-            offset, count = ((0, 98) if city == "giza" else (98, 54) if asn == "as24863" else
-                             (152, 51) if port == "443" else (203, 49) if port == "8080" else (252, 40))
-            result = []
-            for number in range(offset, offset + count):
-                address = (f"192.0.2.{number + 1}" if number < 254 else f"198.51.100.{number - 253}")
-                result.append((address, 1))
-            return result, count
-        return [], 0
+        records = []
+        for number in range(292):
+            address = f"192.0.2.{number + 1}" if number < 254 else f"198.51.100.{number - 253}"
+            city = 'Giza' if number < 98 else 'Cairo'
+            asn = 'AS36992' if number < 98 else 'AS24863' if number < 152 else 'AS8452'
+            port = '80' if number < 98 or number >= 252 else '443' if number < 203 else '8080'
+            record = dict(ip=address,country=self.country,city=city,asn=asn,port=port,
+                          version='1.0',product='Fixture',org='Fixture',os='Fixture')
+            if all((record[field].casefold() not in {v.casefold() for v in values}) if negative
+                   else (record[field].casefold() in {v.casefold() for v in values})
+                   for field,entries in fields.items() for _,_,values,negative in entries):
+                records.append(record)
+        counts = Counter(record[facet] for record in records)
+        return sorted(counts.items(),key=lambda row:(-row[1],row[0])),len(records)
 
     def fetch(self, url: str) -> str:
         params = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)
@@ -121,7 +116,7 @@ class DemoData:
         rows, total = self.values(query, facet)
         # Match the real parser's facet table with links retaining the query.
         body = [f'<html><head><title>Shodan demo facet</title></head><body><h2>Total: {total}</h2><table class="facet-table">']
-        for value, count in rows:
+        for value, count in rows[:engine.FACET_LIMIT]:
             child = engine.narrow_query(query, facet, value) if facet != "ip" else query + ' ip:"' + value + '"'
             href = "/search?" + urllib.parse.urlencode({"query": child})
             body.append(f'<tr><td><a href="{html.escape(href, quote=True)}">{html.escape(value)}</a></td><td>{count}</td></tr>')
@@ -241,6 +236,8 @@ class StudioCrawler(engine.Crawler):
             "warnings": len(self.report["warnings"]), "wait_until": self.not_before_utc,
             "cache_hits": self.report.get("cache_hits", 0), "visited": self.report.get("visited", {}),
             "session_number": self.session_number, "demo": self.demo_data is not None,
+            "planning_strategy": self.args.strategy, "facet_probes": plan.get("facet_probes", 0) if known else 0,
+            "last_partition": plan.get("last_decision") if known else None,
             "traversal_completed": self.report.get("traversal_completed", False),
         }
 

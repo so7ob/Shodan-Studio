@@ -19,6 +19,7 @@ def main():
     parser.add_argument('--premium', action='store_true')
     parser.add_argument('--source-denial', action='store_true')
     parser.add_argument('--interactive', action='store_true')
+    parser.add_argument('--adaptive', action='store_true')
     parser.add_argument('--port', type=int, default=8792)
     args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix='studio-browser-fixture-') as folder:
@@ -26,6 +27,14 @@ def main():
         store.setup(store.setup_token(), 'acceptance', 'local-browser-fixture-123!')
         manager = JobManager(folder, store=store, autostart=False, demo=True)
         manager.vpn = VPNManager(store, BrowserPremiumProvider() if args.premium else FakeProvider())
+        if args.adaptive:
+            job=manager.create_job({'title':'Adaptive 160 fixture','query':'fixture','mode':'html','settings':{'demo':True}})
+            store.record_ip_progress(job['id'],[f'192.0.2.{i+1}' for i in range(160)],
+                {'branches':[{'expected_records':80,'completed':True},{'expected_records':80,'completed':True}], 'planning_complete':True,'traversal_completed':True},
+                stats={'phase':'completed','requests':4,'requests_this_run':4,'ready_branches':2,'completed_branches':2,
+                       'remaining_branches':0,'plan_known':True,'facet_probes':1,
+                       'last_partition':{'facet':'port','children':2,'estimated_requests':2}})
+            store.update_job(job['id'],status='completed')
         if args.interactive:
             state={'running':True,'state':'off_task_page','can_return_to_results':True,'http_status':200,'width':1100,'height':760}
             image='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII='

@@ -348,7 +348,7 @@ def parse_facet_html(html: str, facet: str, query: str | None = None, *,
         if node.tag in ("p", "h1", "h2", "h3", "h4", "h5", "h6"))
     recognizable = bool(cards or selected_facets or "facet analysis" in titles)
     explicit_empty = (total == 0 or (total is None and empty_message)) and not rows and recognizable and not rejected
-    if (allow_missing_facet and facet in ("asn", "port", "version", "product", "org", "os")
+    if (allow_missing_facet and facet in SUPPORTED_FACETS - {"ip"}
             and total is not None and total > 0 and selected_facets and cards
             and not rows and not pairs and not rejected and not empty_message
             and all(not card.text() for card in cards)):
@@ -1507,6 +1507,7 @@ API_DEFAULT_USER_AGENT = "ShodanSpider/7.1 (official API client)"
 MAX_BYTES = 8 * 1024 * 1024
 FACET_LIMIT = 100
 SPLIT_FACETS = frozenset(("asn", "port", "version", "product", "org", "os"))
+ADAPTIVE_FACETS = ("port", "version", "asn", "country", "product", "org", "os", "city")
 SCOPE_FIELDS = SUPPORTED_FACETS - {"ip"}
 IP = ipaddress.IPv4Address | ipaddress.IPv6Address
 API_KEY_PROMPT = object()
@@ -1588,8 +1589,8 @@ def positive_int(text: str) -> int:
 
 def split_facet_list(text: str) -> tuple[str, ...]:
     values = tuple(part.strip().lower() for part in text.split(","))
-    if not values or any(value not in SPLIT_FACETS for value in values) or len(set(values)) != len(values):
-        raise argparse.ArgumentTypeError("Use a nonempty, nonrepeating comma list of asn,port,version,product,org,os.")
+    if not values or any(value not in ADAPTIVE_FACETS for value in values) or len(set(values)) != len(values):
+        raise argparse.ArgumentTypeError("Use supported, nonrepeating facet candidates.")
     return values
 
 
@@ -1721,10 +1722,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("-o", "--output", type=Path, help="IP output file (default: stdout); also writes FILE.report.json")
     parser.add_argument("-f", "--format", choices=("txt", "json", "csv"), default="txt")
     parser.add_argument("--always-asn", action="store_true", help="Visit ASN for every city, including <=100 records")
-    parser.add_argument("--strategy", choices=("priority", "tree"), default="priority",
-                        help="priority: split large branches then extract global descending queue; tree: v6 traversal (default: priority)")
-    parser.add_argument("--split-facets", type=split_facet_list, default="asn,port,version,product",
-                        help="Ordered facets for oversized priority branches; first useful split is retained (default: asn,port,version,product)")
+    parser.add_argument("--strategy", choices=("adaptive", "priority", "tree"), default="adaptive",
+                        help="adaptive: direct IP then cost-based partitioning; priority/tree: legacy geographical traversal")
+    parser.add_argument("--split-facets", type=split_facet_list,
+                        help="Adaptive candidates, or ordered legacy splitting facets; defaults depend on strategy")
     parser.add_argument("--max-plan-nodes", type=positive_int, default=20000,
                         help="Bound priority planning branches; unresolved branches get an explicit fallback warning (default: 20000)")
     parser.add_argument("--api-key", "--api_key", nargs="?", const=API_KEY_PROMPT, metavar="KEY",
@@ -1811,6 +1812,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             args.rotate_user_agents = False
         if "rotate_user_agents" in supplied and args.rotate_user_agents and "user_agent" not in supplied:
             args.user_agent = None
+    if args.split_facets is None:
+        args.split_facets = ADAPTIVE_FACETS if args.strategy == "adaptive" else DEFAULT_SPLIT_FACETS
+    if args.strategy != "adaptive" and any(facet not in SPLIT_FACETS for facet in args.split_facets):
+        parser.error("country/city candidates require --strategy adaptive.")
+    if args.strategy == "adaptive" and args.always_asn:
+        parser.error("--always-asn applies only to legacy priority/tree traversal.")
     if args.rotate_user_agents and args.user_agent is not None:
         parser.error("Use --rotate-user-agents or --user-agent, not both.")
     if args.from_html is not None and (args.checkpoint is not None or args.resume is not None):
@@ -1910,11 +1917,12 @@ def validate_saved_config(cfg: dict[str, Any]) -> None:
         raise SpiderError("[CHECKPOINT_CONFIG] Invalid saved facet limit.")
     if not isinstance(cfg["effective_query"], str) or not cfg["effective_query"]:
         raise SpiderError("[CHECKPOINT_CONFIG] Missing original query.")
-    if cfg.get("strategy", "tree") not in ("priority", "tree"):
+    if cfg.get("strategy", "tree") not in ("adaptive", "priority", "tree"):
         raise SpiderError("[CHECKPOINT_CONFIG] Unsupported saved traversal strategy.")
     if "split_facets" in cfg:
         values = cfg["split_facets"]
-        if not isinstance(values, list) or not values or any(not isinstance(value, str) or value not in SPLIT_FACETS for value in values) or len(set(values)) != len(values):
+        allowed = frozenset(ADAPTIVE_FACETS) if cfg.get("strategy") == "adaptive" else SPLIT_FACETS
+        if not isinstance(values, list) or not values or any(not isinstance(value, str) or value not in allowed for value in values) or len(set(values)) != len(values):
             raise SpiderError("[CHECKPOINT_CONFIG] Invalid saved splitting facets.")
     if "max_plan_nodes" in cfg and (type(cfg["max_plan_nodes"]) is not int or cfg["max_plan_nodes"] < 1):
         raise SpiderError("[CHECKPOINT_CONFIG] Invalid saved planner bound.")
@@ -2606,7 +2614,8 @@ class Crawler:
         self.report["pages_read"] += 1
         try:
             page = parse_facet_html(html, facet, query=query,
-                                    allow_missing_facet=self.args.strategy == "priority" and facet in SPLIT_FACETS)
+                                    allow_missing_facet=(self.args.strategy == "adaptive" and facet != "ip") or
+                                    (self.args.strategy == "priority" and facet in SPLIT_FACETS))
         except FacetParseError as exc:
             entry.update(status="failed", error=safe_detail(exc))
             raise SpiderError(f"[HTML_PARSE] {safe_detail(exc)}") from None
@@ -2890,6 +2899,9 @@ class Crawler:
             self.report["pages"].append(entry)
             self.inspect_coverage(page, entry, None)
             self.collect_ips(page)
+        elif self.args.strategy == "adaptive":
+            from .adaptive import run_adaptive
+            run_adaptive(self)
         elif self.args.strategy == "priority":
             self.run_priority()
         else:
@@ -3291,14 +3303,19 @@ def main(argv: list[str] | None = None) -> int:
     crawler: Crawler | None = None
     try:
         if args.dry_run:
+            first_facet = "ip" if args.strategy == "adaptive" else "country"
             first_url = None if args.from_html else (
                 "https://api.shodan.io/shodan/host/count?" + urllib.parse.urlencode({
                     "query": args.effective_query, "facets": f"country:{args.api_facet_limit}"})
-                if args.mode == "api" else build_url(args.effective_query, "country"))
+                if args.mode == "api" else build_url(args.effective_query, first_facet))
+            if args.strategy == "adaptive" and args.mode == "api":
+                first_url = "https://api.shodan.io/shodan/host/search?" + urllib.parse.urlencode({"query": args.effective_query, "page": 1})
             plan = {"version": VERSION, "mode": args.mode,
                               "original_query": args.effective_query,
                               "first_url": first_url,
-                              "workflow": ("country -> city -> split oversized branches -> globally descending <=100 leaves -> fallback leaves"
+                              "workflow": ("direct IP -> compare partition cost only if incomplete -> verify each child; API: paginated direct search"
+                                           if args.strategy == "adaptive" else
+                                           "country -> city -> split oversized branches -> globally descending <=100 leaves -> fallback leaves"
                                            if args.strategy == "priority" else
                                            "country -> city -> asn -> ip" if args.always_asn else
                                            "country -> city -> (asn when count >100 or unknown) -> ip"),

@@ -1,0 +1,12 @@
+{
+  "fixture": true,
+  "newJobDefault": "adaptive",
+  "legacySelectable": true,
+  "decisionVisible": true,
+  "rtlWidths": [
+    375,
+    1280
+  ],
+  "axeViolations": 0,
+  "errors": []
+}

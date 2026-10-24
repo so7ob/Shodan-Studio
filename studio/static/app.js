@@ -266,6 +266,10 @@
       ? PHASE[job.status] || STATUS[job.status]?.[0] || "بانتظار البدء"
       : PHASE[s.phase] || (s.phase ? String(s.phase) : PHASE[job.status] || STATUS[job.status]?.[0] || "بانتظار البدء");
     text("detail-phase", phase);
+    const adaptive = job.settings?.strategy === "adaptive";
+    show("detail-planner", adaptive);
+    const decision = s.last_partition;
+    text("detail-planner", decision ? `اختار المخطط ${decision.facet}: ${fmt(decision.children)} فروع، نحو ${fmt(decision.estimated_requests)} طلبات استخراج. فحوص التقسيم: ${fmt(s.facet_probes)}.` : "يفحص IP مباشرة، ويقارن كلفة التقسيم فقط عند الحاجة. قد تتغير الخطة مع النتائج.");
     ShodanIPProgress.updateFromJob($("detail-ip-progress"), job);
     text("detail-current-query", s.current_query || job.query || "—");
     text("stat-completed", s.plan_known ? `${fmt(s.completed_branches)} / ${fmt(s.ready_branches)}` : "—");
@@ -309,10 +313,10 @@
   function renderSettings(job) {
     const s = job.settings || {};
     const entries = [
-      ["المصدر المحدد", sourceText(job.mode)], ["الاستراتيجية", s.strategy === "tree" ? "Tree" : "Priority"],
+      ["المصدر المحدد", sourceText(job.mode)], ["الاستراتيجية", s.strategy === "adaptive" ? "تقليل الاستعلامات · Adaptive" : s.strategy === "tree" ? "Tree" : "Priority"],
       ["عميل الاتصال", s.transport || "curl"], ["نوع العناوين", s.ip_version === "all" ? "IPv4 + IPv6" : `IPv${s.ip_version || "4"}`],
       ["حد الطلبات للجولة", fmt(s.max_requests ?? 500)], ["فاصل الطلبات", `${s.delay ?? 2} s`],
-      ["التقسيم بالترتيب", Array.isArray(s.split_facets) ? s.split_facets.join(" → ") : s.split_facets || "asn → port → version → product"],
+      [s.strategy === "adaptive" ? "مرشحو التقسيم" : "التقسيم بالترتيب", Array.isArray(s.split_facets) ? s.split_facets.join(" → ") : s.split_facets || "asn → port → version → product"],
       ["عند تعذّر API", s.api_fallback === "stop" ? "التوقف" : "محاولة HTML"],
       ["أولوية الطابور", String(job.priority ?? 0)], ["تاريخ الإنشاء", dateText(job.created_at)],
     ];
@@ -416,7 +420,14 @@
   function openCreate() {
     $("create-form").reset(); ShodanVPN.prepareCreate(); setFormError("create-error", "");
     $("create-form").elements.demo.checked = !!state.session?.demo;
-    updateKeyField("create"); openDialog("create-dialog");
+    updatePlannerFields(); updateKeyField("create"); openDialog("create-dialog");
+  }
+  function updatePlannerFields(resetCandidates = false) {
+    const fields = $("create-form").elements;
+    const adaptive = fields.strategy.value === "adaptive";
+    fields.always_asn.disabled = adaptive;
+    if (adaptive) fields.always_asn.checked = false;
+    if (resetCandidates) fields.split_facets.value = adaptive ? "port,version,asn,country,product,org,os,city" : "asn,port,version,product";
   }
   function updateKeyField(prefix) {
     const mode = $(`${prefix}-mode`).value;
@@ -522,6 +533,7 @@
       dialog.addEventListener("close", () => dialog.querySelectorAll('input[type="password"]').forEach((input) => { input.value = ""; }));
     });
     ["create", "resume", "import"].forEach((prefix) => $(`${prefix}-mode`).addEventListener("change", () => updateKeyField(prefix)));
+    $("create-form").elements.strategy.addEventListener("change", () => updatePlannerFields(true));
     $("create-form").addEventListener("submit", async (event) => {
       event.preventDefault(); setFormError("create-error", "");
       const form = event.currentTarget; const fields = form.elements;
