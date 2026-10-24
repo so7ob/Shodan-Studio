@@ -1,0 +1,38 @@
+[Unit]
+Description=Shodan Studio browser dashboard and job worker
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=shodan-studio
+Group=shodan-studio
+WorkingDirectory=/opt/shodan-studio/current
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+EnvironmentFile=/etc/default/shodan-studio
+ExecStart=/usr/bin/python3 -m studio.server --host ${SHODAN_STUDIO_HOST} --port ${SHODAN_STUDIO_PORT} --data-dir /var/lib/shodan-studio --allowed-hosts ${SHODAN_STUDIO_ALLOWED_HOSTS} $SHODAN_STUDIO_OPTIONS
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=90s
+KillMode=mixed
+UMask=0077
+StateDirectory=shodan-studio
+StateDirectoryMode=0700
+ReadWritePaths=/var/lib/shodan-studio
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target
