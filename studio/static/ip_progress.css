@@ -1,0 +1,37 @@
+/* Styling matches the existing Arabic dark dashboard without global overrides. */
+.ip-progress {
+  box-sizing: border-box;
+  direction: rtl;
+  width: 100%;
+  color: var(--text);
+  font-family: inherit;
+  line-height: 1.65;
+}
+.ip-progress__top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: .4rem;
+}
+.ip-progress__label { font-size: .82rem; color: var(--muted); }
+.ip-progress__number { color: var(--cyan); font-size: 1.3rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ip-progress__headline { font-size: .88rem; margin-bottom: .65rem; }
+.ip-progress__track { position: relative; width: 100%; height: 6px; border-radius: 100px; background: var(--line); overflow: hidden; }
+.ip-progress__fill { height: 100%; background: var(--cyan); border-radius: inherit;  }
+.ip-progress__track--unknown .ip-progress__fill { animation: ip-progress-loading 2.5s ease-in-out infinite alternate; }
+.ip-progress__below { margin-top: .7rem; color: var(--muted); font-size: .78rem; }
+.ip-progress__branches { margin-top: .5rem; color: var(--muted); font-size: .75rem; }
+.ip-progress--compact .ip-progress__number { font-size: .78rem; }
+.ip-progress--compact .ip-progress__label { font-size: .71rem; }
+.ip-progress--compact .ip-progress__headline { font-size: .72rem; margin-bottom: .45rem; color: var(--muted); }
+.ip-progress--compact .ip-progress__track { height: 4px; }
+@keyframes ip-progress-loading { 0% { transform: translateX(0); } 100% { transform: translateX(-210%); } }
+@media (prefers-reduced-motion: reduce) {
+  .ip-progress__fill { transition: none; }
+  .ip-progress__track--unknown .ip-progress__fill { animation: none; }
+}
+
+.ip-progress--compact { min-width: 220px; max-width: 340px; }
+.ip-progress__top { flex-wrap: wrap; gap: .25rem .75rem; }
+.ip-progress__headline { overflow-wrap: anywhere; }

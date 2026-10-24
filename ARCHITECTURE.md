@@ -1,4 +1,4 @@
-# Shodan Studio 1.0.0 — architecture
+# Shodan Studio 1.1.0 — architecture
 
 This release is a self-hosted, single-user application for Debian 12 and a trusted
 local network or an SSH tunnel. It uses Python's standard library, SQLite and a
@@ -70,13 +70,46 @@ are respected on resume and are not cleared by source changes.
 
 ## Progress semantics
 
-During discovery/partitioning the final number of leaves is unknown. During
-priority extraction, the denominator is the number of known planned leaves,
-including explicit unresolved fallback leaves. The percentage is completed
-known leaves divided by that denominator. A completed traversal does not promise
-a full Shodan export. The planner selects the first useful configured facet and
-orders eligible leaves by record count; it is a heuristic, not a proof of the
-minimum possible number of requests or maximum unique-IP yield.
+The primary list/detail bars consume only `job.ip_progress`. The unchanged
+`stats.percent` remains a legacy branch metric for older clients. The adapter
+uses the supplied IP Progress Integration Kit v1 and recognizes Studio's
+`completed_warnings` success state, gated by successful traversal of every leaf.
+
+`job_ips(job_id, ip)` has a composite primary key and cascading job ownership.
+Worker IP batches are canonicalized and inserted with `INSERT OR IGNORE`;
+`stats.unique_ips` is updated from the database count in the same transaction.
+The cached exact count and numeric `_ip_progress_inputs` live in `jobs.document`.
+Plans above 1,000 leaves are summarized into at most three numeric buckets;
+`leaf_count` preserves cardinality while expected counts sum only remaining
+records. This supports the existing 100,000-node limit without oversized IPC.
+Public responses strip private inputs and recalculate only the inexpensive
+estimator, using current status so interruption/cancellation cannot show 100%.
+Progress/final events include the same `ip_progress` payload. IP batches are not
+stored in the event log. Results and TXT/CSV/JSON exports use the persisted IP set.
+
+The plan adapter consumes `plan.extraction_order`, drops duplicate queries and
+ancestors, and checks the scope trie. Country/city/ASN/port sibling buckets can
+be disjoint service-record scopes, although the same IP can occur in several
+leaves. Sibling product/version/org/os text searches are not assumed exclusive;
+ambiguous scopes or unknown unfinished counts yield an indeterminate bar.
+Tree-mode planning remains unknown until successful traversal because the engine
+does not build a complete terminal plan in that mode.
+
+The kit estimates total IPs as the database count plus estimated remaining IPs.
+This adapter retains the conservative one-new-IP-per-remaining-record prior:
+completed caches cannot establish a reliable global processed-record/dedup ratio.
+Partial API progress subtracts rows only from persisted `api_progress` with one
+unique banner ID per received row, full page shapes, valid IP counts, and no
+API pagination warning. HTTP attempts and retried records never count as work.
+The denominator can change and is never a coverage guarantee.
+
+`saved_config()` adds the numeric-only `studio_ip_progress` checkpoint extension
+through the existing atomic checkpoint writer. It does not alter engine schema,
+search scopes, queries, source selection, pagination or request counts. Startup
+reconciles all job files/checkpoints once with SQLite, before queue startup, to
+recover lost IPC and support re-upgrade after rollback. Normal API polling does
+not scan results/checkpoints or contact Shodan. Legacy jobs without a stored plan
+remain unknown until the plan can be recovered or rebuilt during normal resume.
 
 `requests_this_run` is measured against that run's request budget. `requests`
 includes previous resumes. API credentials, quota, web-page accessibility and

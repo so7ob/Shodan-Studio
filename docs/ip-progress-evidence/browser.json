@@ -1,0 +1,21 @@
+{
+  "report": [
+    {
+      "width": 1280,
+      "axeViolationsInProgressWidgets": 0,
+      "focus": "TR"
+    },
+    {
+      "width": 375,
+      "axeViolationsInProgressWidgets": 0,
+      "focus": "TR"
+    }
+  ],
+  "states": {
+    "unknown": null,
+    "noNumericAria": true,
+    "failed": 99,
+    "zero": 100
+  },
+  "browserErrors": []
+}

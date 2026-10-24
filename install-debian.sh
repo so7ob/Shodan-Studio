@@ -91,8 +91,9 @@ try:
         if not 1 <= int(host_port) <= 65535 or ".." in name or name == "0.0.0.0":
             raise ValueError("invalid browser host or port")
     root = pathlib.Path(source)
-    required = ["studio/server.py", "studio/jobs.py", "studio/worker.py", "studio/engine.py",
+    required = ["studio/server.py", "studio/jobs.py", "studio/worker.py", "studio/engine.py", "studio/ip_progress.py",
                 "studio/static/index.html", "studio/static/app.js", "studio/static/app.css",
+                "studio/static/ip_progress.js", "studio/static/ip_progress.css",
                 "deploy/shodan-studio.service", "start.sh"]
     for relative in required:
         item = root / relative
@@ -149,10 +150,10 @@ import shutil
 import sys
 source, target = map(pathlib.Path, sys.argv[1:])
 ignore = shutil.ignore_patterns("__pycache__", "*.pyc", ".DS_Store")
-for name in ("studio", "deploy", "tests"):
+for name in ("studio", "deploy", "tests", "tools", "docs"):
     if (source / name).is_dir():
         shutil.copytree(source / name, target / name, ignore=ignore)
-for name in ("start.sh", "install-debian.sh", "README_AR.md", "VALIDATION.md", "SHA256SUMS"):
+for name in ("start.sh", "install-debian.sh", "README.md", "README_AR.md", "ARCHITECTURE.md", "DESIGN.md", "VALIDATION.md", "SHA256SUMS"):
     if (source / name).is_file():
         shutil.copy2(source / name, target / name)
 for item in target.rglob("*"):
