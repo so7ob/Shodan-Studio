@@ -7,16 +7,19 @@ window.ShodanVPN = (() => {
   const health = {healthy:'سليم',unhealthy:'غير سليم',unknown:'غير مختبر',host_route:'مسار الخادم'};
   const statuses = {connected:'متصل ومتحقق',disconnected:'غير متصل',unverified:'لم يُتحقق',unknown:'غير معروف'};
   let ctx, snapshot = {profiles:[],status:{}}, editing = null, job = null, loading = false, view = null;
-  let reports = {};
+  let reports = {}, pending = false;
   const country = code => { try { return code ? new Intl.DisplayNames(['ar'], {type:'region'}).of(code) : 'غير محددة'; } catch { return code || 'غير محددة'; } };
   const time = value => value ? new Date(typeof value === 'number' ? value * 1000 : value).toLocaleString('ar') : '—';
   const profile = id => snapshot.profiles.find(p => p.id === id);
   const post = (url, body) => ctx.api(url, {method:'POST', body:JSON.stringify(body)});
   async function perform(button, fn) {
+    if (pending) return;
+    pending = true;
     if (button) button.disabled = true;
+    render();
     try { await fn(); await refresh(); }
     catch (error) { ctx.toast(error.message, 'error'); }
-    finally { if (button) button.disabled = false; }
+    finally { pending = false; if (button) button.disabled = false; render(); }
   }
   function fields(prefix) {
     return `<label class="field"><span>سياسة الاتصال</span><select id="${prefix}-mode"><option value="direct">Direct — مسار الخادم الحالي</option><option value="preferred">Preferred VPN — ملف محدد</option><option value="failover">VPN Failover — تبديل محدود</option><option value="manual">Manual — اتصال يدوي</option></select></label>
@@ -68,6 +71,18 @@ window.ShodanVPN = (() => {
   }
   function render() {
     const status = snapshot.status || {}, active = profile(status.active_profile), check = status.last_check || {};
+    const premium = status.premium || {}, account = premium.account || {};
+    $('premium-status').textContent = premium.configured ? (premium.last_error ? `تعذرت آخر عملية Premium: ${premium.last_error}` : 'الاشتراك مرتبط؛ حالة النفق تظهر بعد التحقق من الاتصال.') : 'لم يُربط اشتراك Premium بعد.';
+    $('premium-summary').innerHTML = [
+      ['المواقع المتاحة في القائمة',premium.location_count ?? 0],
+      ['مصدر القائمة',premium.catalog_source === 'gateway' ? 'بوابة الاشتراك' : premium.catalog_source === 'installed_client' ? 'قائمة مخزنة من العميل المثبت' : 'غير متاح'],
+      ['آخر تحديث للبيانات',time(premium.last_refresh)],['جهاز العامل',premium.device_tag || 'لم يُنشأ'],
+      ['الجهاز مسجل لدى Premium',premium.registered ? 'نعم' : 'لم يُثبت بعد'],
+      ['خانات الحساب المستخدمة / المتاحة',`${account.active_device_count ?? '—'} / ${account.max_device_count ?? '—'}`],
+      ['الملفات المصدّرة في الحساب',account.issued_config_count ?? '—']
+    ].map(([k,v]) => `<div><dt>${esc(k)}</dt><dd dir="auto">${esc(v)}</dd></div>`).join('');
+    $('premium-enroll').disabled = !!premium.configured || !!status.running_job || !!status.busy || pending;
+    $('premium-refresh').disabled = !premium.configured || !!status.running_job || !!status.busy || pending;
     $('vpn-error').textContent = snapshot.error || '';
     $('vpn-error').hidden = !snapshot.error;
     $('vpn-current').innerHTML = [
@@ -80,14 +95,16 @@ window.ShodanVPN = (() => {
     ].map(([k,v]) => `<div><dt>${esc(k)}</dt><dd dir="auto">${esc(v)}</dd></div>`).join('');
     const focused = document.activeElement?.closest('#vpn-profiles button');
     const focusData = focused ? {...focused.dataset} : null;
-    $('vpn-profiles').innerHTML = snapshot.profiles.length ? snapshot.profiles.map(p => `<tr><td>${esc(p.name)}${snapshot.preferred_profile === p.id ? ' · مفضّل' : ''}<small class="mono">${p.id.slice(0,8)}</small></td><td>${esc(country(p.country))}</td><td>${esc(p.protocol)}</td><td>${esc(statuses[p.status] || p.status)}<small>${p.enabled ? 'مفعّل':'معطّل'}</small></td><td>${esc(health[p.health] || p.health)}<small>${esc(time(p.last_check))}</small></td><td dir="ltr">${esc(p.egress_ip)}</td><td>${p.failure_count || 0}<small>${p.cooldown_until > Date.now()/1000 ? `انتظار حتى ${esc(time(p.cooldown_until))}`:'—'}</small></td><td><div class="vpn-actions"><button class="button small secondary" data-vpn-connect="${p.id}" ${!p.enabled || status.running_job ? 'disabled':''}>اتصال</button><button class="button small secondary" data-vpn-edit="${p.id}">تعديل</button><button class="button small secondary" data-vpn-prefer="${p.id}" ${!p.enabled?'disabled':''}>تفضيل</button></div></td></tr>`).join('') : '<tr><td colspan="8">لم تُضف ملفات بعد. نزّل ملف AmneziaWG لكل دولة من لوحة Premium ثم أضفه هنا.</td></tr>';
+    const filter = $('vpn-filter').value.trim().toLocaleLowerCase();
+    const shown = snapshot.profiles.filter(p => `${p.name} ${p.country} ${country(p.country)} ${p.location || ''}`.toLocaleLowerCase().includes(filter));
+    $('vpn-profiles').innerHTML = shown.length ? shown.map(p => `<tr><td>${esc(p.name)}${snapshot.preferred_profile === p.id ? ' · مفضّل' : ''}<small>${p.provider === 'amnezia-premium' ? 'اشتراك Premium · '+esc(p.location) : 'ملف مستورد'}</small><small class="mono">${p.id.slice(0,8)}</small></td><td>${esc(country(p.country))}</td><td>${esc(p.protocol)}</td><td>${esc(statuses[p.status] || p.status)}<small>${p.available === false ? 'غير مدعوم أو غير متاح' : p.enabled ? 'مفعّل':'معطّل'}</small></td><td>${esc(health[p.health] || p.health)}<small>${esc(time(p.last_check))}</small></td><td dir="ltr">${esc(p.egress_ip)}</td><td>${p.failure_count || 0}<small>${p.cooldown_until > Date.now()/1000 ? `انتظار حتى ${esc(time(p.cooldown_until))}`:'—'}</small></td><td><div class="vpn-actions"><button class="button small secondary" data-vpn-connect="${p.id}" ${!p.enabled || status.running_job || status.busy || pending ? 'disabled':''}>اتصال</button><button class="button small secondary" data-vpn-edit="${p.id}">تعديل</button><button class="button small secondary" data-vpn-prefer="${p.id}" ${!p.enabled?'disabled':''}>تفضيل</button></div></td></tr>`).join('') : '<tr><td colspan="8">لا توجد اتصالات مطابقة. اربط اشتراك Premium أو أضف ملف اتصال.</td></tr>';
     if (focusData) {
       const [key,value] = Object.entries(focusData)[0] || [];
       [...$('vpn-profiles').querySelectorAll('button')].find(b => b.dataset[key] === value)?.focus({preventScroll:true});
     }
     $('vpn-audit').innerHTML = (snapshot.events || []).map(item => `<tr><td>${esc(time(item.at))}</td><td>${esc(item.job_id?.slice(0,8))}</td><td>${esc(profile(item.previous_profile)?.name || item.previous_profile)}</td><td>${esc(profile(item.new_profile)?.name || item.new_profile)}</td><td>${esc(item.reason || item.action)}</td><td>${item.verified ? 'تم التحقق' : 'لم يُثبت'} · ${esc(item.status)}</td><td>${item.duration_ms} ms</td></tr>`).join('') || '<tr><td colspan="7">لا توجد أحداث اتصال بعد.</td></tr>';
-    $('vpn-disconnect').disabled = !status.active_profile || !!status.running_job;
-    $('vpn-restore').disabled = !status.previous_profile || !!status.running_job;
+    $('vpn-disconnect').disabled = !status.active_profile || !!status.running_job || !!status.busy || pending;
+    $('vpn-restore').disabled = !status.previous_profile || !!status.running_job || !!status.busy || pending;
     for (const prefix of ['create-net','job-net']) {
       if (!$(prefix + '-mode').closest('dialog')?.open) fillOptions(prefix);
     }
@@ -120,6 +137,7 @@ window.ShodanVPN = (() => {
     $('vpn-profile-form').reset();
     $('vpn-profile-name').value = p?.name || '';
     $('vpn-profile-country').value = p?.country || '';
+    $('vpn-profile-country').readOnly = p?.provider === 'amnezia-premium';
     $('vpn-profile-enabled').checked = p?.enabled ?? true;
     $('vpn-file-field').hidden = !!ident;
     $('vpn-source-field').hidden = !!ident;
@@ -144,6 +162,23 @@ window.ShodanVPN = (() => {
     ['create-net','job-net'].forEach(prefix => $(prefix+'-mode').addEventListener('change', () => togglePolicy(prefix)));
     document.querySelectorAll('[data-network-view]').forEach(el => el.addEventListener('click', () => navigate(el.dataset.networkView)));
     $('vpn-add').addEventListener('click', () => editProfile());
+    $('vpn-filter').addEventListener('input', render);
+    $('premium-enroll').addEventListener('click', () => {
+      $('premium-form').reset(); $('premium-form-error').textContent = ''; $('premium-dialog').showModal();
+    });
+    $('premium-dialog').addEventListener('close', () => $('premium-form').reset());
+    $('premium-refresh').addEventListener('click', event => perform(event.target, async () => {
+      await post('/api/vpn/premium', {action:'refresh'}); ctx.toast('تم تحديث بيانات الاشتراك؛ لم يُغيّر اتصال العامل.');
+    }));
+    $('premium-form').addEventListener('submit', async event => {
+      event.preventDefault(); $('premium-submit').disabled = true;
+      const key = $('premium-key').value.trim(); $('premium-key').value = '';
+      try {
+        await post('/api/vpn/premium', {action:'enroll',key});
+        $('premium-dialog').close(); ctx.toast('رُبط الاشتراك. اختر موقعًا للتحقق من الاتصال.');
+      } catch (error) { $('premium-form-error').textContent = error.message; }
+      finally { $('premium-submit').disabled = false; await refresh(); }
+    });
     $('vpn-discover').addEventListener('click', event => perform(event.target, async () => {
       const result = await ctx.api('/api/vpn/discover');
       $('vpn-profile-source').innerHTML = '<option value="">رفع ملف من جهازك</option>' + result.candidates.map(p => `<option value="${esc(p.source)}">${esc(p.name)}</option>`).join('');

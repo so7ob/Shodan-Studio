@@ -37,3 +37,12 @@ Acceptance: VPN page at 375/1280, no document overflow; zero axe violations in V
 diagnostics, job-network and policy controls; keyboard job entry and modal close.
 Evidence uses a simulated provider and is labelled accordingly. Namespace/runtime
 proof is a separate root-only lab; these screenshots do not prove a Premium egress.
+
+## Dynamic Premium catalog
+
+Keep the same Arabic RTL tokens and native dialogs. A subscription status panel
+precedes the existing connection table; a labelled search input handles a long
+country list without changing the queue/detail layout. Show cached-versus-gateway
+catalog provenance, device registration and slot counts separately from verified
+tunnel status. Never preload or display subscription credentials. Premium country
+labels come from the account catalog and cannot be edited into a false location.

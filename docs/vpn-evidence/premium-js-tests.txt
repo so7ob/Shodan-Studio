@@ -1,0 +1,19 @@
+✔ example 512 of estimated 782 displays 65% (5.617901ms)
+✔ no estimate is not presented as zero percent or 100% (0.5943ms)
+✔ completed zero-IP job can show 100% without fabricated totals (0.5359ms)
+✔ error condition with known count remains estimated (0.4598ms)
+✔ large numbers formatted safely (0.5759ms)
+✔ invalid percent is treated as unknown (0.3749ms)
+✔ rounding or malformed payload cannot display 100 before success (0.4149ms)
+✔ missing progress never falls back to a branch percentage (0.519899ms)
+✔ render creates accessible determinate progressbar (1.769601ms)
+✔ render unknown estimate as non-numeric status (1.101901ms)
+✔ compact list retains secondary branch counts and safely renders text (0.5652ms)
+ℹ tests 11
+ℹ suites 0
+ℹ pass 11
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 235.65373

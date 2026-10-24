@@ -22,6 +22,7 @@ import threading
 import time
 
 from .vpn_config import metadata, parse_profile, profile_id
+from .premium import Premium
 
 NS = 'ssvpn-worker'
 IFACE = 'ssvpn0'
@@ -82,6 +83,37 @@ class Broker:
         self.runtime.mkdir(parents=True, exist_ok=True, mode=0o750)
         self.registry = self.root / 'profiles.json'
         self.profiles = json.loads(self.registry.read_text()) if self.registry.exists() else {}
+        self.premium = Premium(self.root, transport=self._premium_request)
+        self._sync_premium()
+
+    def _premium_request(self, operation, payload):
+        # Network/crypto parsing happens without root or network capabilities.
+        # The subprocess deadline also bounds DNS lookup and slow response bodies.
+        request = dict(operation=operation, payload=payload, transport=self.premium.state.get('transport', {}))
+        try:
+            run = subprocess.run(self._unprivileged('studio.premium', isolated=False, gateway=True),
+                                 input=json.dumps(request), text=True, stdout=subprocess.PIPE,
+                                 stderr=subprocess.DEVNULL, timeout=28, env=ENV, cwd=self.code)
+            result = json.loads(run.stdout)
+            if run.returncode or not result.get('ok'):
+                from .premium import fail, ERRORS
+                fail(result.get('code') if result.get('code') in ERRORS else 'NETWORK')
+            return result['result']
+        except (OSError, ValueError, subprocess.TimeoutExpired):
+            from .premium import fail
+            fail('NETWORK')
+
+    def _sync_premium(self):
+        current = {p['id']: p for p in self.premium.profiles()}
+        for ident, old in self.profiles.items():
+            if old.get('provider') == 'amnezia-premium' and ident not in current:
+                old.update(enabled=False, available=False)
+        for ident, item in current.items():
+            item.pop('id')
+            old = self.profiles.get(ident, {})
+            item['enabled'] = bool(item['available'] and old.get('enabled', item['enabled']))
+            item['name'] = old.get('name', item['name'])
+            self.profiles[ident] = item
 
     def _save(self):
         private_write(self.registry, json.dumps(self.profiles))
@@ -95,6 +127,7 @@ class Broker:
         return path
 
     def list_profiles(self):
+        self._sync_premium()
         return [dict(id=ident, **value) for ident, value in self.profiles.items()]
 
     def discover_profiles(self):
@@ -108,7 +141,7 @@ class Broker:
     def add(self, raw, meta):
         clean = metadata(meta)
         parsed = parse_profile(raw)
-        if len(self.profiles) >= 50:
+        if sum(p.get('provider') != 'amnezia-premium' for p in self.profiles.values()) >= 50:
             raise ValueError('Maximum 50 VPN profiles.')
         ident = secrets.token_hex(16)
         private_write(self.root / 'profiles' / (ident + '.conf'), raw)
@@ -126,9 +159,14 @@ class Broker:
         with os.fdopen(fd) as stream:
             return self.add(stream.read(16385), meta)
 
-    def _unprivileged(self, module, *args, isolated=True):
+    def _unprivileged(self, module, *args, isolated=True, gateway=False):
+        uid, gid = self.uid, self.gid
+        if gateway:
+            account = pwd.getpwnam('shodan-vpn-gateway')
+            uid, gid = account.pw_uid, account.pw_gid
+            if uid in (0, self.uid): raise RuntimeError('Premium gateway requires a separate unprivileged account.')
         prefix = [IP, 'netns', 'exec', NS] if isolated else []
-        return prefix + [SETPRIV, '--reuid', str(self.uid), '--regid', str(self.gid),
+        return prefix + [SETPRIV, '--reuid', str(uid), '--regid', str(gid),
                          '--clear-groups', '--no-new-privs', '--bounding-set=-all',
                          '/usr/bin/python3', '-s', '-m', module, *args]
 
@@ -177,7 +215,16 @@ class Broker:
         profile_id(ident)
         if ident not in self.profiles or not self.profiles[ident]['enabled']:
             raise ValueError('VPN profile unavailable or disabled.')
-        parsed = parse_profile(self._path(ident).read_text())
+        record = self.profiles[ident]
+        if record.get('provider') == 'amnezia-premium':
+            # A timed-out gateway request may have changed this device remotely.
+            self.last_check = None
+            raw = self.premium.configuration(record['location'])
+            self._sync_premium()
+            self._save()
+            parsed = parse_profile(raw)
+        else:
+            parsed = parse_profile(self._path(ident).read_text())
         tool = self._tool(parsed['protocol'])
         # Reusing an active host key can make the peer roam away from SSH's VPN.
         # Compare public keys only, without exposing either key in responses.
@@ -212,13 +259,24 @@ class Broker:
                 command([IP, '-n', NS, f'-{version}', 'route', 'add', 'default', 'dev', IFACE])
             self.active = ident
             self.last_change = time.time()
-            report = self.health_check()
-            if not report['healthy']:
-                raise RuntimeError('Tunnel verification failed; no worker was started.')
-            return report
+            return self._verify_connection()
         except Exception:
+            failed_check = self.last_check
             self._remove_interface()
+            self.last_check = failed_check
             raise
+
+    def _verify_connection(self):
+        # Initial AWG handshakes may outlast the first DNS request. Retry the
+        # same tunnel, never allocate another Premium configuration or identity.
+        for attempt in range(3):
+            if attempt: time.sleep(attempt)
+            report = self.health_check()
+            if report['healthy']: return report
+        checks = ', '.join(k + '=' + ('ok' if report.get(k) else 'failed') for k in
+                           ('dns', 'tcp', 'tls', 'http', 'handshake', 'route_verified', 'leak_protection'))
+        prefix = '[VPN_DESTINATION] ' if report.get('tunnel_healthy') else ''
+        raise RuntimeError(prefix + 'Tunnel verification failed; no worker was started. ' + checks)
 
     def switch_profile(self, ident):
         old = self.active
@@ -269,15 +327,16 @@ class Broker:
         except (RuntimeError, ValueError, KeyError):
             return dict(interface_up=False, route_verified=False, leak_protection=False)
 
-    def get_status(self):
-        isolation = self._isolation()
+    def get_status(self, busy=False):
+        isolation = dict(interface_up=False, route_verified=False, leak_protection=False) if busy else self._isolation()
         verified = bool(self.last_check and self.last_check['healthy']
                         and time.time() - self.last_check.get('checked_at', 0) < 60 and isolation['interface_up']
                         and isolation['route_verified'] and isolation['leak_protection'])
         return dict(active_profile=self.active, previous_profile=self.previous, interface=IFACE,
                     namespace=NS, running_job=self.running_job, last_change=self.last_change,
-                    capabilities={"amneziawg": Path(AWG).is_file() and Path(GO).is_file(), "wireguard": Path(WG).is_file(), "gui_country_automation": False},
-                    verified=verified, last_check=self.last_check, **isolation)
+                    capabilities={"amneziawg": Path(AWG).is_file() and Path(GO).is_file(), "wireguard": Path(WG).is_file(), "gui_country_automation": False,
+                                  "premium_subscription": True}, premium=self.premium.status(),
+                    verified=verified, busy=busy, last_check=self.last_check, **isolation)
 
     def health_check(self, scope='worker'):
         if scope not in {'host', 'worker'}:
@@ -322,15 +381,29 @@ class Broker:
         allowed = {'profiles': set(), 'discover': set(), 'status': set(), 'health': {'scope'},
                    'import': {'config', 'metadata'}, 'import_existing': {'source', 'metadata'},
                    'update': {'profile_id', 'metadata'}, 'connect': {'profile_id'},
-                   'disconnect': set(), 'restore': set()}
+                   'disconnect': set(), 'restore': set(), 'premium_refresh': set(), 'premium_enroll': {'key'}}
         if op not in allowed or set(request) - ({'op'} | allowed[op]):
             raise ValueError('Operation is not allowed.')
+        if op in {'profiles', 'status'}:
+            if not self.lock.acquire(blocking=False):
+                # The monitor holds the lock while probing DNS/TLS. Polling must
+                # remain responsive, and must not claim stale health as verified.
+                return self.get_status(busy=True) if op == 'status' else [dict(id=k, **v) for k,v in list(self.profiles.items())]
+            try:
+                return self.get_status() if op == 'status' else self.list_profiles()
+            finally:
+                self.lock.release()
         with self.lock:
-            if op in {'connect', 'disconnect', 'restore', 'update'} and self.running_job:
+            if op in {'connect', 'disconnect', 'restore', 'update', 'premium_refresh', 'premium_enroll'} and self.running_job:
                 raise RuntimeError('Pause the active worker and wait for its checkpoint before changing VPN.')
             if op == 'profiles': return self.list_profiles()
             if op == 'discover': return self.discover_profiles()
             if op == 'status': return self.get_status()
+            if op in {'premium_refresh', 'premium_enroll'}:
+                result = self.premium.enroll(request['key']) if op == 'premium_enroll' else self.premium.refresh()
+                self._sync_premium()
+                self._save()
+                return result
             if op == 'health': return self.health_check(request.get('scope', 'worker'))
             if op == 'import': return self.add(request['config'], request['metadata'])
             if op == 'import_existing': return self.import_existing(request['source'], request['metadata'])
@@ -338,6 +411,11 @@ class Broker:
                 ident = profile_id(request['profile_id'])
                 if ident not in self.profiles: raise ValueError('Unknown profile.')
                 clean = metadata(request['metadata'])
+                if self.profiles[ident].get('provider') == 'amnezia-premium':
+                    if clean['country'] != self.profiles[ident]['country']:
+                        raise ValueError('Premium country is determined by the subscription catalog.')
+                    if clean['enabled'] and not self.profiles[ident].get('available'):
+                        raise ValueError('Premium location does not support the installed AWG adapter.')
                 if ident == self.active and not clean['enabled']: self.disconnect()
                 self.profiles[ident].update(clean)
                 self._save()
@@ -410,7 +488,7 @@ class Handler(socketserver.StreamRequestHandler):
             if len(raw) > 1024 * 1024: raise ValueError('Request too large.')
             request = json.loads(raw)
             if not isinstance(request, dict): raise ValueError('Invalid request.')
-            self.request.settimeout(90)
+            self.request.settimeout(240)
             if request.get('op') == 'run':
                 broker.run_worker(request, self.request)
                 return

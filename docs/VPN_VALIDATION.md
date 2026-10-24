@@ -1,93 +1,119 @@
-# VPN Manager validation — 2026-10-24
+# VPN Manager / Premium validation — 2026-10-24
 
-## Evidence boundaries
+## Delivered on Debian 12
 
-- The installed Amnezia client is 5.0.3.0. The user confirms Premium country selection.
-- Existing exported candidate: `orbitvpn.conf`; its secrets were never printed.
-- **No live Premium country connection or cross-country switch is claimed.**
-  Per-location independent exported profiles are required for that acceptance.
-- The real namespace lab uses generated ephemeral AWG3 keys, local peers, and
-  local HTTPS. It makes no Shodan search and never reuses the user's tunnel key.
-- Browser acceptance uses the real HTTP application with a simulated VPN provider.
+Version **1.3.0** is installed in the existing Shodan Studio service. The original
+Python/SQLite/buildless Arabic RTL application, queue, checkpoints and results
+remain. Premium support targets the installed AmneziaVPN **5.0.3.0** protocol;
+it is source-compatible integration, not a public vendor SDK.
 
-## Checks
+The gateway returned **55 real account locations**. A persistent independent worker
+identity occupies one device slot. After the user freed capacity, the account used
+5 of 7 slots, including 2 exported files; those counts remained unchanged across
+Germany → USA East. No native-export or revoke API was called. The host GUI's
+identity, settings file and tunnel were not changed.
+
+## Live acceptance
+
+| Check | Actual result / evidence |
+|---|---|
+| Authenticated dashboard API: Germany | `135.136.45.186`; DNS/TCP/TLS/HTTPS/handshake/route/leak checks passed |
+| Same API: USA East | `38.132.96.202`; all checks passed; different egress |
+| Dashboard responsiveness during connection | 92 management checks, each dashboard poll under 2 seconds |
+| SSH/dashboard availability | localhost TCP listeners remained reachable throughout the switch |
+| Host state | identical IPv4/IPv6 routes, rules, stateless nft rules, DNS, GUI-settings hash and SSH/Amnezia PIDs before/after |
+| Controlled tunnel loss | actual managed tunnel disconnected; Python and curl could not reach direct internet |
+| Actual failover engine | selected allowed Germany from USA East with one persisted attempt; verified real egress before returning resume state |
+| Restart bound | a fresh manager using the test DB could not exceed its persisted one-switch limit |
+
+Evidence: [`premium-live.json`](vpn-evidence/premium-live.json) and
+[`premium-live-failover.json`](vpn-evidence/premium-live-failover.json).
+The controlled-loss job metadata was synthetic in a temporary database. No live
+Shodan search or production job was used to force failures. Actual worker,
+checkpoint and extraction behavior is covered by the independent local AWG lab
+and automated scenarios below, rather than claimed from that synthetic job.
+
+Both selected countries were verified through the subscription catalog and actual
+exit IP. No GeoIP provider is configured: this does not independently prove the
+physical location of those IPs or test all 55 locations.
+
+## Automated / browser / local-lab acceptance
 
 | Check | Evidence |
 |---|---|
-| Pre-change Python baseline | 108 tests passed |
-| Current Python suite | 135 tests; `vpn-evidence/python-tests.txt` |
-| Existing JS IP progress | 11 tests; `vpn-evidence/js-tests.txt` |
-| Arabic RTL 375/1280, keyboard entry, profile validation, network policy | `vpn-evidence/browser.json`, screenshots |
-| axe: VPN, diagnostics, job network, policy controls | zero violations in the tested regions |
-| Actual AWG3 handshake and TLS via Python/curl inside namespace | `vpn-evidence/isolation-lab.json` |
-| Actual broker launches dropped-UID worker, checkpoint and 292 synthetic IPs | same lab evidence |
-| Tunnel removal blocks Python/curl direct egress | same lab evidence |
-| SSH/dashboard TCP listeners reachable before/during/after tunnel | same lab evidence |
-| Host route/rule/stateless-firewall/DNS snapshots identical after lab | same lab evidence |
-| Real DB copy migration preserves jobs/IPs/users/events | `vpn-evidence/migration-rehearsal.json` |
+| Full Python suite | **156 passed**, `vpn-evidence/premium-python-tests.txt` |
+| Existing JavaScript progress suite | **11 passed**, `vpn-evidence/premium-js-tests.txt` |
+| Premium browser on real HTTP app with simulated provider | enrollment, masked/cleared key, 55-location filter, immutable country, verified connection |
+| Arabic RTL at 375 and 1280 | no horizontal page overflow, zero axe violations in tested Premium regions/dialog; `premium-browser.json` and `premium-rtl-*.png` |
+| Installed service with real subscription catalog | `premium-live-ui.json`, screenshots; RTL/axe at 375/1280 |
+| Original VPN/job/diagnostics browser | `vpn-evidence/browser.json`; zero axe violations in tested regions |
+| Actual local AWG3 handshake and Python/curl TLS | `vpn-evidence/isolation-lab.json` |
+| Actual dropped-UID worker, checkpoint, 292 synthetic IPs | same local lab; no external Shodan searches |
+| Same lab under helper systemd sandbox | `vpn-evidence/systemd-isolation-lab.txt` |
+| Separate application survives service restarts, preserves partial output and resumes | `vpn-evidence/service-restart-tests.txt` |
+| Real pre-VPN DB copy migration | `vpn-evidence/migration-rehearsal.json` |
 
-The automated suite covers profile parsing/command rejection, connect/failed-connect
-cooldown/audit, TLS retry recovery, DNS outage/checkpoint resume without refetching
-completed pages, health-confirmed failover, all profiles failing, persistent switch
-limits, legacy direct jobs, restart health invalidation, protected rollback, helper
-leases, restoring the previous profile, auth/CSRF, and secret omission.
+The suite covers strict profiles and command rejection; bounded TLS/DNS retry;
+checkpoint recovery without repeating completed pages; no switching for HTTP
+quota/auth or a destination-only fault on a healthy tunnel; all profiles failing;
+allowlists/cooldowns; persistent attempt counts; atomic checkpoint replacement;
+cancel during diagnosis; legacy Direct jobs; restart invalidation; helper leases;
+auth/CSRF and redaction. Premium adds encrypted transport, TLS and endpoint
+restrictions, persistent independent identity, country/config/key matching,
+account-limit/expiry/captcha/rate-limit handling, root-private files, independent
+gateway UID, supported AWG template bounds, and responsive polling during monitoring.
 
-The lab initially caught an nft syntax error, corrected before deployment. Its
-first host-state comparison also counted changing packet counters; the final
-comparison uses nft's stateless rule output, retaining the rules while excluding
-unrelated live traffic counters. A full-suite run found a direct-mode resume race
-introduced by the network guard; the guard was narrowed and the original job
-regression suite rerun. Failed intermediate runs are not acceptance evidence.
+Reproduce the Premium browser fixture with Playwright and @axe-core/playwright
+installed in your test tooling (not production dependencies):
 
-## Remaining acceptance limits
+```bash
+python3 tests/serve_vpn_fixture.py --premium
+# In another terminal, with those Node packages available:
+node tests/browser_premium.cjs http://127.0.0.1:8792
+```
 
-- Real Premium egress/country failover needs independent location `.conf` files;
-  the implementation neither exports subscription assets nor modifies Premium account state.
-- Handshake/isolated HTTPS were exercised with the bundled userspace AWG3 daemon;
-  kernel WireGuard and other versions/platforms were not live-tested.
-- No host reboot was performed. Interrupted-job recovery is automated; service
-  restarts and on-host installation are recorded separately below when performed.
-- SSH evidence is TCP listener reachability plus unchanged routing; no new remote
-  SSH authentication session was created by the test.
-- GeoIP coordinates are unavailable; countries are explicitly user-defined.
-- The existing stdlib WSGI/trusted-LAN/SSH-tunnel deployment boundary remains.
-  This is not public multi-tenant hosting certification or an external security audit.
+Restart the fixture before each run; it uses a fresh temporary database and
+loopback-only synthetic credentials. This test never contacts Premium.
 
-## On-host delivery
+## Deployment and data preservation
 
-The application and helper were installed on Debian 12. `/health` returned
-`{"ok":true,"version":"1.2.0"}`. The migration retained 4 jobs, 750 per-job IP
-records, 1 user and 2,608 events; job files remained byte-identical. The existing
-AmneziaVPN and SSH service PIDs were unchanged. A full private data/config backup
-and the automatic pre-migration SQLite backup are retained. See
-`vpn-evidence/deployment.json` for release and backup paths.
+`/health` returns `{"ok":true,"version":"1.3.0"}`. The upgrade retained **4 jobs,
+750 per-job IP records, 1 user and 2,689 events**, with byte-identical job files.
+The schema remains at version 1; Premium requires no extra migration. The initial
+VPN schema migration and original 1.2 deployment are recorded separately in
+`deployment.json` / `deployment-initial.json`.
 
-The first rollout verifier used the wrong health URL; its rollback restored the
-old code. The corrected verifier uses the existing `/health` endpoint. This was a
-verification-script error, not a claim that `/api/health` exists.
+The latest release and private backup paths are recorded in
+[`premium-deployment.json`](vpn-evidence/premium-deployment.json). Backups include
+root-private subscription state, preserving the independent device identity.
+The final service restart retained the same profile ID and account counts; a new
+verified Germany connection kept all 55 locations. See `premium-post-restart.json`.
+The service web UID cannot read this file; the separate unprivileged gateway UID
+also cannot read it. The root helper passes only the bounded request over private
+pipes. No secrets are stored in the public registry, SQLite, API or test evidence.
 
-The root-only `orbitvpn.conf` candidate was imported as **disabled, untested, country
-unknown**. No Premium tunnel was started. The unprivileged service account can use
-the constrained socket but cannot read profile secrets; an unrelated UID cannot
-connect to the socket. The helper is available with AmneziaWG; system WireGuard
-CLI is absent and is reported unavailable.
+Failed intermediate attempts are not acceptance results. Live testing exposed
+trailing whitespace in the config envelope, a longer AWG packet template, startup
+DNS/handshake delay, a polling wait behind the health monitor, and an older
+54-country list embedded in tunnel templates. Only account_info now replaces
+the authoritative catalog, so connecting cannot shrink the 55-country list. All received
+regression coverage before the passing live run. A manual diagnostic left an
+empty test namespace outside the systemd mount namespace; deployment refused to
+reuse it and rolled back. The empty owned namespace was removed while the helper
+was stopped, then normal deployment and the sandboxed live test passed.
 
-The local AWG3/real-worker/checkpoint lab also passed under a systemd sandbox with
-the helper's capability bounding, namespace restrictions, read-only filesystem,
-no-new-privs and unprivileged worker. See `vpn-evidence/systemd-isolation-lab.txt`.
-A separate application service survived two restarts, retained partial output and
-resumed to 292 synthetic IPs without touching the production service; evidence is
-in `vpn-evidence/service-restart-tests.txt`.
+## Remaining limits
 
-Health probes now test the independent egress even when destination TLS fails.
-An otherwise healthy tunnel is not switched for a destination-only error.
-Dashboard reads remain responsive while a connect/probe is pending; the queue
-waits until that manual network operation releases its reservation.
+- Only Germany and USA East were live-tested, not every Premium location.
+- No host reboot or new remote authenticated SSH session was performed. Evidence
+  covers unchanged routes/PIDs and listener reachability, plus service restarts.
+- Kernel WireGuard, other Amnezia versions and other operating systems were not
+  live-tested. Static imported `orbitvpn.conf` remains disabled and untested.
+- Protocol compatibility is pinned to the upstream client source. Incompatible
+  gateway responses stop protected work; they may require an adapter update.
+- The trusted-LAN/SSH-tunnel stdlib WSGI deployment boundary remains. This is not
+  a public multi-tenant hosting certification or an external security audit.
+- No production Shodan queries were consumed to simulate failure cases.
 
-Installed Python/static files were SHA-256 compared with the final workspace and
-matched exactly. Final local suite: **135 Python tests and 11 JavaScript tests,
-all passing**. The additional coverage includes interrupted checkpoint replacement
-preserving the previous file and cancellation during network diagnosis never
-reviving a cancelled job. The baseline release for a pre-VPN rollback is recorded
-in `deployment-initial.json`; the most recent deployment record points to the
-immediately preceding validated 1.2 candidate.
+Operational instructions: [Premium](VPN_PREMIUM_AR.md),
+[VPN usage](VPN_MANAGER_AR.md), [upgrade and rollback](VPN_DEPLOYMENT_AR.md).

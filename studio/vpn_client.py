@@ -10,7 +10,7 @@ SOCKET = '/run/shodan-studio-vpn/control.sock'
 
 def connect(path=SOCKET):
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    sock.settimeout(90)
+    sock.settimeout(240)  # Bounded Premium configuration + 3 probes + restoration.
     try:
         sock.connect(path)
         return sock

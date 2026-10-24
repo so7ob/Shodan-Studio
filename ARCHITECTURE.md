@@ -149,3 +149,21 @@ jobs retain results and lose stale verified-health claims.
 See [VPN operating guide](docs/VPN_MANAGER_AR.md),
 [deployment and rollback](docs/VPN_DEPLOYMENT_AR.md), and
 [discovery/design evidence](docs/VPN_DISCOVERY.md).
+
+## Premium extension (1.3)
+
+`premium.py` implements the AmneziaVPN 5.0.3.0 gateway protocol, with fixed HTTPS
+origins and the pinned production RSA public key. A root-private record persists
+an independent worker UUID. Each country connection obtains a fresh AWG config
+for that UUID; no native export or revoke operation exists. Public country IDs
+are deterministic UUID5 values and reuse the existing job allowlists and audit.
+
+The gateway subprocess runs as `shodan-vpn-gateway`, separate from web/worker,
+with all capabilities dropped and a 28-second deadline. Credentials cross private
+pipes only. The root bootstrap tool reads the installed client without modifying
+it. The authenticated Premium API cannot choose a gateway or command.
+
+Connection verification retries the same tunnel at most three times. Account and
+protocol failures stop failover, as do destination-only failures on a healthy
+tunnel. Dashboard reads during the helper's periodic probe return unverified
+busy status immediately. No database schema change is required beyond VPN v1.

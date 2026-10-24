@@ -1,0 +1,90 @@
+{
+  "kind": "live-Premium-via-authenticated-dashboard-API",
+  "before": {
+    "routes4": "57209d87c3c06731abc0a4875ac7ba7cfe5a37ecd2a424d0b524b25dd00aeff6",
+    "routes6": "02aace27e9a18a96f0cb3d3ec66c9521d42d30beb56e3df85927f78fcf37c5a5",
+    "rules": "fbf9509a2b397dfa9b419538718ef19c596274d1c191db8809edcf1d72c07209",
+    "firewall": "baddc72e157630445221143b4f1551e179ed0f5a76a2b569dc26a0272c252f50",
+    "dns": "f5107060afa743c7bbbbde6bf8033200338d0df9f3d9e8dfabcd02258c923097",
+    "gui": "64cbcd367ab044937a250246830552a421cdc46db64f0be2059b0498fb799f81",
+    "pids": {
+      "AmneziaVPN": "67394",
+      "ssh": "1026"
+    }
+  },
+  "locations": [
+    {
+      "location": "de",
+      "profile_id": "a567dab31f885ffca68a5669147d7fae",
+      "report": {
+        "dns": true,
+        "tcp": true,
+        "tls": true,
+        "http": true,
+        "egress_ip": "135.136.45.186",
+        "geolocation": null,
+        "target": "www.shodan.io",
+        "latency_ms": 16565,
+        "healthy": true,
+        "scope": "worker",
+        "interface_up": true,
+        "route_verified": true,
+        "leak_protection": true,
+        "handshake": true,
+        "tunnel_healthy": true,
+        "checked_at": 1792871074.8226454
+      },
+      "duration_seconds": 52.72
+    },
+    {
+      "location": "us-east",
+      "profile_id": "9eb36ef2759355819a6301c9f2068f28",
+      "report": {
+        "dns": true,
+        "tcp": true,
+        "tls": true,
+        "http": true,
+        "egress_ip": "38.132.96.202",
+        "geolocation": null,
+        "target": "www.shodan.io",
+        "latency_ms": 1640,
+        "healthy": true,
+        "scope": "worker",
+        "interface_up": true,
+        "route_verified": true,
+        "leak_protection": true,
+        "handshake": true,
+        "tunnel_healthy": true,
+        "checked_at": 1792871115.608703
+      },
+      "duration_seconds": 40.66
+    }
+  ],
+  "management_checks": 92,
+  "account_before": {
+    "active_device_count": 5,
+    "max_device_count": 7,
+    "issued_config_count": 2
+  },
+  "registered_before": true,
+  "account_after": {
+    "active_device_count": 5,
+    "max_device_count": 7,
+    "issued_config_count": 2
+  },
+  "distinct_egress": true,
+  "success": true,
+  "after": {
+    "routes4": "57209d87c3c06731abc0a4875ac7ba7cfe5a37ecd2a424d0b524b25dd00aeff6",
+    "routes6": "02aace27e9a18a96f0cb3d3ec66c9521d42d30beb56e3df85927f78fcf37c5a5",
+    "rules": "fbf9509a2b397dfa9b419538718ef19c596274d1c191db8809edcf1d72c07209",
+    "firewall": "baddc72e157630445221143b4f1551e179ed0f5a76a2b569dc26a0272c252f50",
+    "dns": "f5107060afa743c7bbbbde6bf8033200338d0df9f3d9e8dfabcd02258c923097",
+    "gui": "64cbcd367ab044937a250246830552a421cdc46db64f0be2059b0498fb799f81",
+    "pids": {
+      "AmneziaVPN": "67394",
+      "ssh": "1026"
+    }
+  },
+  "host_unchanged": true
+}

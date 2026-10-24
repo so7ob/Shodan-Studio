@@ -83,13 +83,16 @@ def parse_profile(raw):
             if current is None or '=' not in line:
                 raise ValueError()
             key, value = (x.strip() for x in line.split('=', 1))
-            if key in current or not value or len(value) > 1024:
+            # AWG 2/3 Premium signatures include hex packet templates (I1-I5).
+            # They are passed as data to the native parser, never a shell.
+            limit = 4096 if key in {'I1', 'I2', 'I3', 'I4', 'I5'} else 1024
+            if key in current or not value or len(value) > limit:
                 raise ValueError()
             current[key] = value
         interface, peer = sections['[Interface]'], sections['[Peer]']
         if set(interface) - INTERFACE_KEYS or set(peer) - PEER_KEYS:
             raise ValueError()
-        if sum(len(v) for k,v in interface.items() if k.startswith('I')) > 512:
+        if sum(len(v) for k,v in interface.items() if k in {'I1', 'I2', 'I3', 'I4', 'I5'}) > 8192:
             raise ValueError()
         for obj, keys in ((interface, ('PrivateKey', 'HeaderProtectionKey')), (peer, ('PublicKey', 'PresharedKey'))):
             for key in keys:

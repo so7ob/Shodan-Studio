@@ -15,6 +15,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
+      - run: python3 -m pip install 'cryptography>=38'
       - run: python3 -m unittest discover -s tests
       - run: node --test tests/test_ip_progress.mjs
       - run: node --check studio/static/vpn.js

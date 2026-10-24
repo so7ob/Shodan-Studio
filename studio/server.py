@@ -287,6 +287,8 @@ class StudioApp:
             return self.json_response({"profile": self.manager.vpn.add(payload)}, 201)
         if path == "/api/vpn/actions" and method == "POST":
             return self.json_response(self.manager.vpn_action(payload))
+        if path == "/api/vpn/premium" and method == "POST":
+            return self.json_response(self.manager.vpn_premium(payload))
         if path == "/api/vpn/diagnostics" and method == "POST":
             if set(payload) != {"scope"}:
                 raise ValueError('طلب التشخيص غير صالح.')

@@ -9,6 +9,9 @@ from .store import _json, utc_now
 from .vpn_client import rpc
 from .vpn_config import NETWORK_DEFAULTS, policy, profile_id
 
+PREMIUM_TERMINAL = tuple('[PREMIUM_' + code + ']' for code in
+                         ('LIMIT', 'AUTH', 'EXPIRED', 'CAPTCHA', 'RATE_LIMIT', 'UPDATE', 'RESPONSE'))
+
 
 class VPNProvider(Protocol):
     def discover_profiles(self): ...
@@ -41,6 +44,11 @@ class HelperProvider:
             return rpc('import_existing', **payload)
         raise ValueError('اختر ملف اتصال أو مصدرًا مكتشفًا وبياناته.')
     def update(self, ident, meta): return rpc('update', profile_id=ident, metadata=meta)
+    def premium(self, payload):
+        if payload == {'action': 'refresh'}: return rpc('premium_refresh')
+        if set(payload) == {'action', 'key'} and payload['action'] == 'enroll':
+            return rpc('premium_enroll', key=payload['key'])
+        raise ValueError('طلب Premium غير صالح.')
 
 
 class VPNManager:
@@ -152,6 +160,22 @@ class VPNManager:
             self.invalidate()
             return record
 
+    def premium(self, payload):
+        if not isinstance(payload, dict): raise ValueError('طلب Premium غير صالح.')
+        with self.lock:
+            action = payload.get('action')
+            if action not in {'refresh', 'enroll'}: raise ValueError('طلب Premium غير صالح.')
+            try:
+                result = self.provider.premium(payload)
+            except (RuntimeError, ValueError):
+                self.audit('premium_' + action, status='failed')
+                raise
+            finally:
+                self.invalidate()
+            self.audit('premium_' + action)
+            self.profiles()
+            return result
+
     def _record_check(self, ident, check):
         item = self._saved().get(ident)
         if item is None: return
@@ -247,6 +271,12 @@ class VPNManager:
         """Called only after worker exit/final checkpoint; never during writes."""
         if job.get('network_mode', 'direct') != 'failover' or not job.get('vpn_failover_enabled'):
             return None
+        if str(job.get('last_network_error', '')).startswith(PREMIUM_TERMINAL):
+            self.audit('no_switch', job_id=job['id'], reason='premium_account_or_protocol_error')
+            return None
+        if str(job.get('last_network_error', '')).startswith('[VPN_DESTINATION]'):
+            self.audit('no_switch', job_id=job['id'], reason='tunnel_healthy_destination_error')
+            return None
         count = job.get('failover_count', 0)
         if count >= job.get('max_failovers', 2): return None
         current = job.get('active_vpn_profile') or job.get('preferred_vpn_profile')
@@ -271,7 +301,8 @@ class VPNManager:
                                   last_failover_at=utc_now(), previous_vpn_profile=current)
             try:
                 check = self.connect(ident, job_id=job['id'], reason=job.get('last_network_error') or 'network_unavailable')
-            except RuntimeError:
+            except RuntimeError as exc:
+                if str(exc).startswith(PREMIUM_TERMINAL + ('[VPN_DESTINATION]',)): return None
                 continue
             return dict(active_vpn_profile=ident, current_egress_ip=check['egress_ip'], network_health='healthy',
                         network_phase='resuming_extraction', last_failover_at=utc_now(), failover_count=count)

@@ -2,10 +2,12 @@
 
 المسارات أدناه تحققت في هذا الخادم. لا تنقل بيانات خادم آخر إليها بلا فحص.
 الترقية تضيف جدولين وتغيّر `PRAGMA user_version` من 0 إلى 1، دون حذف جداول
-أو إعادة إنشاء المهام. تشغيل أداة التركيب لا يتصل بأي ملف VPN.
+أو إعادة إنشاء المهام. الترقية من 1.2 إلى 1.3 تبقي المخطط عند النسخة 1.
+تشغيل أداة التركيب لا يتصل بأي ملف VPN.
 
 ## المتطلبات والأدوات
 
+لـPremium يلزم python3-cryptography؛ راجع [ربط الاشتراك](VPN_PREMIUM_AR.md).
 Python 3.11 وiproute2 وnftables وutil-linux وcurl وca-certificates.
 للـAmneziaWG: daemon الموجود في `/opt/AmneziaVPN/bin/amneziawg-go` وأداة awg
 الرسمية. لم تُستخدم awg-quick لأنها قد تنفذ hooks وتعدل شبكة المضيف.
@@ -15,7 +17,7 @@ Python 3.11 وiproute2 وnftables وutil-linux وcurl وca-certificates.
 تثبيت awg من المصدر الرسمي المثبت بالإصدار المستخدم في الاختبار:
 
 ```bash
-sudo apt install build-essential git iproute2 nftables util-linux curl ca-certificates
+sudo apt install build-essential git iproute2 nftables util-linux curl ca-certificates python3-cryptography
 git clone https://github.com/amnezia-vpn/amneziawg-tools.git /tmp/studio-awg-tools
 git -C /tmp/studio-awg-tools checkout ee0f0a9aa34ff0a0da4b3433b9512781cfe02843
 make -C /tmp/studio-awg-tools/src -j2
@@ -88,6 +90,10 @@ curl --fail http://127.0.0.1:8787/health
 
 ## التراجع
 
+مرجع ما قبل Premium محفوظ في `vpn-evidence/premium-baseline.json`، ومرجع
+آخر ترقية في `vpn-evidence/premium-deployment.json`. لا تعتمد على اسم
+`previous` دون فحص وجهته؛ قد يشير إلى نسخة 1.3 سابقة لا إلى 1.2.
+
 تراجع الكود يحافظ على جداول VPN الإضافية ونتائج ما بعد الترقية. أوقف
 الخدمتين أولًا، وتحقق أن `previous` يشير للإصدار المقصود قبل تبديل الرابط:
 
@@ -98,7 +104,7 @@ sudo ln -sfn "$(readlink -f /opt/shodan-studio/previous)" /opt/shodan-studio/cur
 sudo systemctl disable shodan-studio-vpn
 ```
 
-**قبل تشغيل الإصدار القديم**: لأنه لا يفهم سياسة VPN، لا تسمح له بتشغيل مهام
+**عند الرجوع إلى إصدار قبل 1.2**: لأنه لا يفهم سياسة VPN، لا تسمح له بتشغيل مهام
 VPN مصطفة. على النسخة الجديدة، أوقف هذه المهام قبل التراجع. إذا وقع فشل
 قبل ذلك، نفذ الأمر الآتي بعد إيقاف الخدمات؛ يحوّلها إلى paused ويحتفظ
 بالسياسة والنتائج. لا يستخدم قاعدة بيانات أخرى:
@@ -109,7 +115,9 @@ sudo python3 tools/pause_vpn_jobs.py /var/lib/shodan-studio/studio.sqlite3
 
 شغّل الأداة من checkout أو حزمة الإصدار الجديد؛ لا تبحث عنها داخل الإصدار
 القديم. لا تطبع الأداة بيانات المهام أو مفاتيحها.
-لا تستكمل مهام VPN باستخدام الإصدار القديم: لن يعزل اتصالها.
+لا تستكمل مهام VPN باستخدام إصدار قبل 1.2: لن يعزل اتصالها.
+عند الرجوع إلى 1.2، تبقى ملفات WG/AWG المستوردة مدعومة، لكن مهام مواقع
+Premium الديناميكية يجب أن تبقى متوقفة إلى إعادة 1.3؛ لا يوجد ملف ثابت لها.
 
 ثم `sudo systemctl start shodan-studio`. راجع المهام مباشرة. أعد الترقية
 لتشغيل المهام المحمية. لا تزل مفاتيح VPN أو بيانات المهام أثناء التراجع.

@@ -349,6 +349,9 @@ class JobManager:
     def vpn_update(self, ident, payload):
         return self._vpn_mutation(lambda: self.vpn.update(ident, payload))
 
+    def vpn_premium(self, payload):
+        return self._vpn_mutation(lambda: self.vpn.premium(payload))
+
     def _network_wait(self, job_id, error):
         with self._lock:
             job = self._get(job_id)

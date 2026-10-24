@@ -61,7 +61,7 @@ in the host namespace; the old host Amnezia connection is never switched.
 
 Live evidence and limitations belong in VPN_VALIDATION.md after implementation.
 
-## Premium correction from user
+## Premium correction from user — original 1.2 scope
 
 The user confirms an active Premium subscription and country switching in the
 installed GUI. The single exported `.conf` is **not** a count of subscription
@@ -78,3 +78,13 @@ Official amneziawg-tools was built from
 `/usr/local/libexec/shodan-studio/awg`. The bundled userspace daemon accepted
 AWG3 HeaderProtectionKey/S1-S4 in the independent local namespace lab. This is
 protocol support evidence, not verification of the Premium candidate's endpoint.
+
+## Authorized 1.3 follow-up
+
+The user explicitly requested dynamic subscription switching and freed account
+capacity. Root-only inspection subsequently verified Premium credentials and the
+HTTPS gateway cache without printing secrets or changing the GUI. The gateway
+returned 55 locations. The new independent worker identity uses one device slot;
+actual account counts and live tunnel evidence are in `VPN_VALIDATION.md`.
+The original static-export limitation above is superseded by the source-pinned
+adapter documented in `VPN_PREMIUM_DESIGN.md`.

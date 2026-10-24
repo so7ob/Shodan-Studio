@@ -76,6 +76,11 @@ class ProfileTests(unittest.TestCase):
             with self.subTest(raw_length=len(raw)):
                 with self.assertRaises(ValueError) as caught: parse_profile(raw)
                 self.assertNotIn(KEY,str(caught.exception))
+    def test_premium_packet_templates_remain_bounded(self):
+        template = '<b 0x' + 'ab' * 1356 + '>'
+        self.assertEqual(parse_profile(CONFIG.replace('DNS =', 'I1 = '+template+'\nDNS ='))['protocol'], 'amneziawg')
+        for fields in ('I1 = '+ 'a'*4097, '\n'.join('I'+str(i)+' = '+'a'*3000 for i in range(1,4))):
+            with self.assertRaises(ValueError): parse_profile(CONFIG.replace('DNS =', fields+'\nDNS ='))
     def test_policy_defaults_and_allowlist(self):
         self.assertEqual(policy()['network_mode'],'direct')
         for bad in ({'network_mode':'other'}, {'network_mode':'preferred'},
@@ -315,6 +320,41 @@ class ProbeTests(unittest.TestCase):
 
 
 class BrokerSecurityTests(unittest.TestCase):
+    def test_status_during_monitor_is_responsive_and_never_verified(self):
+        import threading,time
+        broker=object.__new__(Broker);broker.lock=threading.RLock();broker.profiles={P1:{'enabled':True}}
+        broker.active=P1;broker.previous=None;broker.running_job=None;broker.last_change=None
+        broker.last_check={**GOOD,'checked_at':time.time()}
+        broker.premium=type('PremiumStatus',(),{'status':lambda _: {'configured':True}})()
+        entered=threading.Event();release=threading.Event()
+        def monitor():
+            with broker.lock:entered.set();release.wait(5)
+        thread=threading.Thread(target=monitor);thread.start()
+        try:
+            self.assertTrue(entered.wait(1));start=time.monotonic()
+            with patch.object(broker,'_isolation',side_effect=AssertionError('must not run a probe')):
+                state=broker.dispatch({'op':'status'})
+                self.assertEqual(len(broker.dispatch({'op':'profiles'})),1)
+            self.assertLess(time.monotonic()-start,.5)
+            self.assertFalse(state['verified']);self.assertTrue(state['busy'])
+        finally:release.set();thread.join(5)
+    def test_premium_gateway_has_separate_unprivileged_identity(self):
+        broker=object.__new__(Broker);broker.uid=123;broker.gid=123
+        account=type('Account',(),{'pw_uid':124,'pw_gid':124})()
+        with patch('studio.vpn_helper.pwd.getpwnam',return_value=account):
+            argv=broker._unprivileged('studio.premium',isolated=False,gateway=True)
+            self.assertEqual(argv[argv.index('--reuid')+1],'124')
+            self.assertIn('--bounding-set=-all',argv)
+            account.pw_uid=123
+            with self.assertRaises(RuntimeError):broker._unprivileged('studio.premium',isolated=False,gateway=True)
+    def test_connect_verification_retries_same_tunnel_without_new_configuration(self):
+        broker=object.__new__(Broker)
+        with patch.object(broker,'health_check',side_effect=[{'healthy':False},GOOD]) as probe, patch('studio.vpn_helper.time.sleep'):
+            self.assertTrue(broker._verify_connection()['healthy'])
+            self.assertEqual(probe.call_count,2)
+        with patch.object(broker,'health_check',return_value={'healthy':False,'tunnel_healthy':True}) as probe, patch('studio.vpn_helper.time.sleep'):
+            with self.assertRaisesRegex(RuntimeError,'VPN_DESTINATION'):broker._verify_connection()
+            self.assertEqual(probe.call_count,3)
     def test_reject_unapproved_commands_without_exec(self):
         broker=object.__new__(Broker)
         with patch('studio.vpn_helper.command') as command:
