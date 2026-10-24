@@ -1,0 +1,43 @@
+{
+  "deployed": true,
+  "helper_restarted": false,
+  "version": "1.4.0",
+  "previous_release": "/opt/shodan-studio/releases/release-XKDG7GYb",
+  "current_release": "/opt/shodan-studio/releases/release-72lQCVjt",
+  "backup": "/var/backups/shodan-studio/pre-browser-20261024-213703.tar.gz",
+  "backup_restore_sqlite_verified": true,
+  "counts_before": {
+    "jobs": 4,
+    "job_ips": 778,
+    "users": 1,
+    "events": 3115
+  },
+  "counts_after": {
+    "jobs": 4,
+    "job_ips": 778,
+    "users": 1,
+    "events": 3115
+  },
+  "job_files_unchanged": true,
+  "schema_version": 1,
+  "health": {
+    "ok": true,
+    "version": "1.4.0"
+  },
+  "helper_active": true,
+  "host_unchanged": true,
+  "host_snapshot": {
+    "routes4": "57209d87c3c06731abc0a4875ac7ba7cfe5a37ecd2a424d0b524b25dd00aeff6",
+    "routes6": "02aace27e9a18a96f0cb3d3ec66c9521d42d30beb56e3df85927f78fcf37c5a5",
+    "rules": "fbf9509a2b397dfa9b419538718ef19c596274d1c191db8809edcf1d72c07209",
+    "firewall": "baddc72e157630445221143b4f1551e179ed0f5a76a2b569dc26a0272c252f50",
+    "dns": "f5107060afa743c7bbbbde6bf8033200338d0df9f3d9e8dfabcd02258c923097",
+    "gui": "64cbcd367ab044937a250246830552a421cdc46db64f0be2059b0498fb799f81",
+    "pids": {
+      "AmneziaVPN": "67394",
+      "ssh": "1026"
+    }
+  },
+  "pre_feature_stable_release": "/opt/shodan-studio/releases/release-C094WAMQ",
+  "pre_feature_backup": "/var/backups/shodan-studio/pre-browser-20261024-211324.tar.gz"
+}

@@ -61,6 +61,9 @@ def build_args(job_dir: Path, job: dict, key: str | None):
     # Explicit mode keeps an inherited environment key from choosing the source.
     os.environ.pop("SHODAN_API_KEY", None)
     args = engine.parse_args(argv)
+    args.studio_browser_job = job['id'] if job.get('browser_session_enabled') else None
+    if args.studio_browser_job and (job['mode'] != 'html' or job.get('network_mode','direct') == 'direct'):
+        raise engine.SpiderError('[BROWSER_SESSION] Browser extraction requires HTML and an isolated VPN.')
     # Checkpoints are data, never authority to choose a filesystem destination.
     if args.output is None or args.output.absolute() != job_dir / "result.txt" or args.report_path.absolute() != job_dir / "result.txt.report.json" or args.format != "txt":
         raise engine.SpiderError("[JOB_PATH] مسار نتائج نقطة الاستكمال لا يطابق مجلد المهمة.")
@@ -148,7 +151,7 @@ class StudioCrawler(engine.Crawler):
         self._finalizing = False
         self._initializing = True
         self._current_query = args.effective_query
-        super().__init__(args, fetcher=self.demo_data.fetch if demo else None,
+        super().__init__(args, fetcher=self.demo_data.fetch if demo else self.browser_fetch if getattr(args,'studio_browser_job',None) else None,
                          sleeper=self.interruptible_sleep, continue_prompt=self.needs_input)
         if args.mode == "api":
             self.configure_source("api")
@@ -158,6 +161,21 @@ class StudioCrawler(engine.Crawler):
 
     def configure_source(self, mode, client=None):
         return super().configure_source(mode, client=self.demo_data if mode == "api" and self.demo_data else client)
+
+    def browser_fetch(self, url):
+        import re
+        from .vpn_client import rpc
+        try:
+            result=rpc('browser_fetch',job_id=self.args.studio_browser_job,url=url)
+            if result.get('http_status')==429:
+                delay=result.get('retry_after')
+                if delay=='unbounded':delay=float('inf')
+                elif type(delay) not in (int,float) or delay<0:delay=None
+                raise engine.SpiderError(str(engine.http_failure(429)),http_status=429,retry_after=delay)
+            return result['html']
+        except RuntimeError as exc:
+            match=re.match(r'\[HTTP_(\d{3})\]',str(exc))
+            raise engine.SpiderError(str(exc),http_status=int(match[1]) if match else None,failure_kind='browser_session') from None
 
     def saved_config(self):
         return {**super().saved_config(), "studio_demo": self.demo_data is not None,

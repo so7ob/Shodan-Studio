@@ -119,6 +119,7 @@ window.ShodanVPN = (() => {
   }
   function renderJob(value) {
     job = value;
+    ShodanBrowser.render(value);
     const p = profile(job.active_vpn_profile || job.preferred_vpn_profile);
     $('job-network-state').textContent = `${job.network_mode || 'direct'} · ${p?.name || (job.network_mode && job.network_mode !== 'direct' ? 'ملف VPN غير متاح' : 'مسار الخادم')} · ${country(p?.country)} · ${job.current_egress_ip || 'عنوان الخروج غير متحقق'} · ${health[job.network_health] || 'غير مختبر'}`;
     $('job-network-phase').textContent = phases[job.network_phase] || '';
@@ -164,6 +165,7 @@ window.ShodanVPN = (() => {
   }
   function init(context) {
     ctx = context;
+    ShodanBrowser.init(context);
     $('create-network').innerHTML = fields('create-net');
     $('job-network-fields').innerHTML = fields('job-net');
     ['create-net','job-net'].forEach(prefix => $(prefix+'-mode').addEventListener('change', () => togglePolicy(prefix)));

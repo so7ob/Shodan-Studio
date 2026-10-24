@@ -20,11 +20,12 @@ def connect(path=SOCKET):
 
 
 def rpc(operation, *, socket_path=SOCKET, **fields):
+    limit = 12 * 1024 * 1024 if operation == 'browser_fetch' else 1024 * 1024
     with connect(socket_path) as sock:
         sock.sendall(json.dumps({'op': operation, **fields}).encode() + b'\n')
         with sock.makefile('rb') as stream:
-            body = stream.readline(1024 * 1024 + 1)
-        if len(body) > 1024 * 1024:
+            body = stream.readline(limit + 1)
+        if len(body) > limit:
             raise RuntimeError('استجابة VPN أكبر من المسموح.')
         try:
             response = json.loads(body)

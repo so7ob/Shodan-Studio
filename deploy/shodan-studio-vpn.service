@@ -20,6 +20,7 @@ UMask=0077
 RuntimeDirectory=shodan-studio-vpn
 RuntimeDirectoryMode=0750
 ReadWritePaths=/etc/shodan-studio/vpn /etc/netns /run/netns /run/amneziawg /run/shodan-studio-vpn /var/lib/shodan-studio
+ReadWritePaths=-/var/lib/shodan-studio-browser
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
@@ -31,7 +32,7 @@ ProtectControlGroups=yes
 RestrictSUIDSGID=yes
 RestrictRealtime=yes
 LockPersonality=yes
-RestrictNamespaces=net mnt
+RestrictNamespaces=net mnt user pid ipc uts
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
 CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_SYS_ADMIN CAP_SETUID CAP_SETGID CAP_SETPCAP CAP_KILL CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER
 

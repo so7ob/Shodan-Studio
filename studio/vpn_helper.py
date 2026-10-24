@@ -78,6 +78,8 @@ class Broker:
         self.daemon = None
         self.last_check = None
         self.last_change = None
+        from .browser_broker import BrowserBroker
+        self.browser = BrowserBroker(self)
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
         (self.root / 'profiles').mkdir(exist_ok=True, mode=0o700)
         self.runtime.mkdir(parents=True, exist_ok=True, mode=0o750)
@@ -204,6 +206,7 @@ class Broker:
         return tool
 
     def _remove_interface(self):
+        if getattr(self, 'browser', None): self.browser.close()
         if self._ns_exists():
             command([IP, '-n', NS, 'link', 'del', IFACE], check=False)
         command([IP, 'link', 'del', IFACE], check=False)
@@ -301,6 +304,8 @@ class Broker:
             check = self.launch_check()
             if check['healthy']:
                 return check
+            if getattr(self,'browser',None) and self.browser.status()['running']:
+                raise RuntimeError('أغلق جلسة المتصفح قبل إعادة إنشاء النفق المتعطل.')
         try:
             result = self._connect(ident)
             if old != ident:
@@ -353,6 +358,7 @@ class Broker:
                     namespace=NS, running_job=self.running_job, last_change=self.last_change,
                     capabilities={"amneziawg": Path(AWG).is_file() and Path(GO).is_file(), "wireguard": Path(WG).is_file(), "gui_country_automation": False,
                                   "premium_subscription": True}, premium=self.premium.status(),
+                    browser=self.browser.status() if getattr(self, 'browser', None) else {'running':False},
                     verified=verified, busy=busy, last_check=self.last_check, **isolation)
 
     def health_check(self, scope='worker', *, source_check=False):
@@ -410,6 +416,7 @@ class Broker:
     def dispatch(self, request):
         op = request.get('op')
         allowed = {'profiles': set(), 'discover': set(), 'status': set(), 'health': {'scope'}, 'diagnostics': {'scope'},
+                   'browser': {'job_id', 'input'}, 'browser_fetch': {'job_id', 'url'},
                    'import': {'config', 'metadata'}, 'import_existing': {'source', 'metadata'},
                    'update': {'profile_id', 'metadata'}, 'connect': {'profile_id'},
                    'disconnect': set(), 'restore': set(), 'premium_refresh': set(), 'premium_enroll': {'key'}}
@@ -425,6 +432,11 @@ class Broker:
             finally:
                 self.lock.release()
         with self.lock:
+            if op == 'browser': return self.browser.action(request)
+            if op == 'browser_fetch': return self.browser.fetch(request['job_id'],request['url'])
+            if op in {'connect','disconnect','restore','update','premium_refresh','premium_enroll'} and getattr(self,'browser',None) and self.browser.status()['running']:
+                if op != 'connect' or request.get('profile_id') != self.active:
+                    raise RuntimeError('أغلق جلسة المتصفح قبل تغيير اتصال VPN أو إعداداته.')
             if op in {'connect', 'disconnect', 'restore', 'update', 'premium_refresh', 'premium_enroll'} and self.running_job:
                 raise RuntimeError('Pause the active worker and wait for its checkpoint before changing VPN.')
             if op == 'profiles': return self.list_profiles()
@@ -464,6 +476,10 @@ class Broker:
         with self.lock:
             if self.running_job:
                 raise RuntimeError('A VPN worker already owns the tunnel.')
+            if self.browser.status()['running'] and self.browser.job != ident:
+                raise RuntimeError('Another browser job owns the tunnel.')
+            if payload['job'].get('browser_session_enabled') and (not self.browser.status()['running'] or self.browser.job != ident):
+                raise RuntimeError('[BROWSER_SESSION] افتح جلسة المتصفح وتحقق من الصفحة قبل الاستكمال.')
             if payload['job']['id'] != ident or payload['job'].get('active_vpn_profile') != self.active or not self.active:
                 raise ValueError('Worker profile does not match the verified tunnel.')
             # Revalidate at launch, not merely at the earlier browser action.
@@ -565,6 +581,8 @@ def main():
         def monitor():
             while not monitor_stop.wait(30):
                 with broker.lock:
+                    if broker.browser.status()['running'] and not broker.running_job and time.monotonic()-broker.browser.last_used>1800:
+                        broker.browser.close()
                     if broker.active and (not broker.last_check or time.time() - broker.last_check.get('checked_at', 0) >= 25):
                         with contextlib.suppress(Exception): broker.health_check()
         threading.Thread(target=monitor, daemon=True).start()

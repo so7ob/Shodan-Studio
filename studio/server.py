@@ -297,6 +297,9 @@ class StudioApp:
         if vpn_match and method == "POST":
             return self.json_response({"profile": self.manager.vpn_update(vpn_match[1], payload)})
         network_match = re.fullmatch(r"/api/jobs/([a-f0-9]{32})/network", path)
+        browser_match = re.fullmatch(r"/api/jobs/([a-f0-9]{32})/browser", path)
+        if browser_match and method == 'POST':
+            return self.json_response(self.manager.browser_action(browser_match[1],payload))
         if network_match and method == "POST":
             return self.json_response({"job": self.manager.network_settings(network_match[1], payload)})
         if path == "/api/jobs":
@@ -365,6 +368,7 @@ class StudioApp:
             "/static/ip_progress.js": ("ip_progress.js", "text/javascript; charset=utf-8"),
             "/static/ip_progress.css": ("ip_progress.css", "text/css; charset=utf-8"),
             "/static/vpn.js": ("vpn.js", "text/javascript; charset=utf-8"),
+            "/static/browser.js": ("browser.js", "text/javascript; charset=utf-8"),
             "/static/vpn.css": ("vpn.css", "text/css; charset=utf-8"),
             "/favicon.svg": ("favicon.svg", "image/svg+xml"),
         }

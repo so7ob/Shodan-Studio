@@ -1,0 +1,40 @@
+{
+  "kind": "live-browser-checkpoint-progress",
+  "job_id": "63d837ce5331009394884dc936273831",
+  "before": {
+    "requests_total": 26,
+    "cached_facets": 12
+  },
+  "samples": [
+    {
+      "observed_at": "2026-10-24T21:28:32.984855+00:00",
+      "status": "waiting_input",
+      "phase": "waiting",
+      "requests_this_run": 4,
+      "unique_ips": 0,
+      "source": "html",
+      "requests_total": 30,
+      "cached_facets": 15,
+      "browser": {
+        "running": true,
+        "job_id": "63d837ce5331009394884dc936273831",
+        "profile_id": "4df52d18aad557589b7ef1f5f8a9ef38",
+        "state": "awaiting_verification"
+      },
+      "checkpoint_sha256": "931e256d42782906fb3864c0f0e67bae4cd7c6f5de639054398c85c862339bc3"
+    }
+  ],
+  "new_parsed_facets_saved": 3,
+  "full_job_completed": false,
+  "verified_after_user_completed_challenge": true,
+  "observed_report": {
+    "pages_read": 3,
+    "requests_attempted": 4,
+    "cache_hits": 12,
+    "unique_ip_count": 0,
+    "status": "paused",
+    "partial_saved": true,
+    "http_status": 429,
+    "rate_limit_count": 1
+  }
+}

@@ -243,11 +243,12 @@ class Store:
             con.commit()
         return job
 
-    def claim_next(self) -> dict[str, Any] | None:
+    def claim_next(self, job_id=None) -> dict[str, Any] | None:
         with self.connection() as con:
             con.execute("BEGIN IMMEDIATE")
             rows = con.execute("SELECT id,document FROM jobs WHERE status='queued' ORDER BY priority DESC,created_at").fetchall()
             for row in rows:
+                if job_id is not None and row['id'] != job_id: continue
                 job = json.loads(row["document"])
                 scheduled = job.get("scheduled_at")
                 if scheduled and str(scheduled) > utc_now():

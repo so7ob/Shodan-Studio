@@ -1,0 +1,56 @@
+{
+  "kind": "live-isolated-browser",
+  "version": "1.4.0",
+  "job_id": "63d837ce5331009394884dc936273831",
+  "browser": {
+    "running": true,
+    "state": "browser_challenge",
+    "http_status": 403,
+    "host": "www.shodan.io",
+    "width": 1100,
+    "height": 760
+  },
+  "verification": {
+    "running": true,
+    "state": "browser_challenge",
+    "http_status": 403,
+    "host": "www.shodan.io",
+    "width": 1100,
+    "height": 760
+  },
+  "vpn": {
+    "active_profile": "4df52d18aad557589b7ef1f5f8a9ef38",
+    "verified": true,
+    "namespace": "ssvpn-worker",
+    "browser": {
+      "running": true,
+      "job_id": "63d837ce5331009394884dc936273831",
+      "profile_id": "4df52d18aad557589b7ef1f5f8a9ef38",
+      "state": "browser_challenge"
+    },
+    "leak_protection": true,
+    "route_verified": true
+  },
+  "egress_ip": "135.136.11.182",
+  "browser_process": {
+    "pid": 386215,
+    "uid": 995,
+    "capabilities": "0000000000000000",
+    "no_new_privileges": "1",
+    "network_namespace": "net:[4026532576]"
+  },
+  "same_worker_namespace": true,
+  "no_namespace_tcp_listeners": true,
+  "private_destination_guard": true,
+  "web_cannot_read_browser_profile": true,
+  "host_network_and_ssh_unchanged": true,
+  "health": {
+    "ok": true,
+    "version": "1.4.0"
+  },
+  "live_search_completed": false,
+  "manual_verification_required": true,
+  "success": true,
+  "reopen_existing_session_ms": 141,
+  "cold_start_measured": false
+}

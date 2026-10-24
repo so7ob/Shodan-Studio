@@ -18,6 +18,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--premium', action='store_true')
     parser.add_argument('--source-denial', action='store_true')
+    parser.add_argument('--interactive', action='store_true')
     parser.add_argument('--port', type=int, default=8792)
     args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix='studio-browser-fixture-') as folder:
@@ -25,6 +26,16 @@ def main():
         store.setup(store.setup_token(), 'acceptance', 'local-browser-fixture-123!')
         manager = JobManager(folder, store=store, autostart=False, demo=True)
         manager.vpn = VPNManager(store, BrowserPremiumProvider() if args.premium else FakeProvider())
+        if args.interactive:
+            state={'running':True,'state':'awaiting_verification','http_status':403,'width':1100,'height':760}
+            image='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII='
+            def browser_rpc(job_id,data):
+                if data['action']=='verify':state.update(state='ready',http_status=200)
+                if data['action']=='stop':return {'running':False,'state':'closed'}
+                return {**state,**({'image':image} if data['action']=='frame' else {})}
+            manager._browser_rpc=browser_rpc
+            job=manager.create_job({'title':'Interactive browser fixture','query':'fixture','mode':'html','settings':{'demo':True},'network':{'network_mode':'preferred','preferred_vpn_profile':'1'*32}})
+            store.update_job(job['id'],status='waiting_input',input_reason='source_error',error='[HTTP_403] [BROWSER_CHALLENGE] fixture')
         if args.source_denial:
             from test_vpn import GOOD
             manager.vpn.provider.diagnostics = lambda scope: dict(GOOD, scope=scope,

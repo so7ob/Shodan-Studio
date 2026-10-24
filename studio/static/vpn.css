@@ -8,3 +8,12 @@
 .vpn-policy{border:1px solid var(--line);border-radius:8px;padding:16px;margin-block:16px}.vpn-policy legend{padding-inline:8px}.vpn-policy select[multiple]{min-height:100px}.vpn-heading{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
 #job-network-state,#job-network-phase{line-height:1.9;overflow-wrap:anywhere}#job-network-count{color:var(--muted);font-variant-numeric:tabular-nums}
 @media(max-width:700px){.vpn-grid{grid-template-columns:1fr}.vpn-section{padding:14px}.vpn-kv{grid-template-columns:1fr 1fr;gap:12px}.vpn-actions .button{min-height:36px}}
+
+/* Uses the dashboard's existing RTL palette and native modal controls. */
+.browser-modal { width: min(96vw, 74rem); max-width: 74rem; }
+.browser-screen { background: var(--bg); border: 1px solid var(--line); min-height: 8rem; overflow: hidden; }
+#browser-frame { width: 100%; height: auto; display: block; aspect-ratio: 1100/760; object-fit: contain; cursor: crosshair; }
+#browser-frame:focus-visible { outline: 2px solid var(--cyan); outline-offset: -2px; }
+.browser-input { display: flex; align-items: end; gap: .75rem; margin-block: .75rem; }
+.browser-input .field { flex: 1; min-width: 0; }
+.browser-keys { flex-wrap: wrap; }

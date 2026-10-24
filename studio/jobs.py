@@ -53,6 +53,8 @@ class JobManager:
         self._process = None
         self._active_id = None
         self._network_operation = False
+        self._browser_job = None
+        self._browser_deadline = 0
         self._ownership = None
         self._ip_cache = {}
         if autostart:
@@ -75,6 +77,11 @@ class JobManager:
                 raise ValueError("توجد خدمة أخرى تستخدم مجلد البيانات نفسه.") from None
             self.store.recover_interrupted()
             self._restore_ip_progress()
+            with contextlib.suppress(Exception):
+                browser = self.vpn.provider.get_status().get('browser', {})
+                if browser.get('running') and self.store.get_job(browser.get('job_id')):
+                    self._browser_job = browser['job_id']
+                    self._browser_deadline = time.monotonic() + 1800
             self._stop.clear()
             self._thread = threading.Thread(target=self._loop, name="studio-queue", daemon=True)
             self._thread.start()
@@ -126,6 +133,7 @@ class JobManager:
         with self._lock:
             result["has_key"] = result["id"] in self._keys
             result["network_busy"] = self._active_id == result["id"]
+            result['browser_session_open'] = self._browser_job == result['id']
         path = self._path(result["id"])
         result["has_checkpoint"] = (path / "checkpoint.json").is_file()
         result["has_results"] = bool(result.get("stats", {}).get("unique_ips")) or (path / "live-ips.txt").is_file() or (path / "result.txt").is_file()
@@ -282,13 +290,19 @@ class JobManager:
                     raise JobValidationError("مصدر غير صالح.")
                 if mode == "auto":
                     mode = "api" if key else "html"
+                if job.get('browser_session_enabled'):
+                    if mode != 'html' and self._browser_job == job_id: raise JobValidationError('أغلق جلسة المتصفح قبل تغيير مصدر المهمة.')
+                    if mode == 'html':
+                        verified = self._browser_rpc(job_id, {'action':'verify'})
+                        if verified.get('state') != 'ready': raise JobValidationError('أكمل التحقق من صفحة Shodan داخل المتصفح ثم افحص الصفحة قبل الاستكمال.')
                 if key and (key in job["query"] or key in job["title"] or key in job["settings"]["user_agent"]):
                     raise JobValidationError("المفتاح موجود في حقل نصي للمهمة؛ استخدم مهمة جديدة دون تضمين المفتاح.")
                 if mode == "api" and not key and not job["settings"]["demo"]:
                     raise JobValidationError("أدخل مفتاح API أو اختر HTML.")
                 self._remember(job_id, key)
                 (self._path(job_id) / "control.json").unlink(missing_ok=True)
-                self.store.update_job(job_id, status="queued", mode=mode, error=None, finished_at=None, input_reason=None)
+                self.store.update_job(job_id, status="queued", mode=mode, error=None, finished_at=None, input_reason=None,
+                                      browser_session_enabled=bool(job.get('browser_session_enabled') and mode=='html'))
                 self._wake.set()
             else:
                 raise JobValidationError("إجراء غير مدعوم.")
@@ -301,16 +315,22 @@ class JobManager:
     def _loop(self):
         while not self._stop.is_set():
             try:
+                if self._browser_job and (time.monotonic() > self._browser_deadline or self._get(self._browser_job)['status'] in FINAL - {'failed'}):
+                    with contextlib.suppress(Exception): self.browser_action(self._browser_job, {'action':'stop'})
                 with self._lock:
                     if self._stop.is_set():
                         break
-                    job = None if self._network_operation else self.store.claim_next()
+                    job = None if self._network_operation else self.store.claim_next(self._browser_job)
                     if job:
                         self._active_id = job["id"]
                 if job:
                     self._execute(job)
                     with self._lock:
                         self._active_id = None
+                        if self._browser_job == job['id']:
+                            self._browser_deadline = time.monotonic() + 1800
+                    if self._browser_job == job['id'] and self._get(job['id'])['status'] in FINAL - {'failed'}:
+                        with contextlib.suppress(Exception): self.browser_action(job['id'], {'action':'stop'})
                     continue
             except Exception as exc:
                 if self._active_id:
@@ -323,6 +343,7 @@ class JobManager:
     def network_settings(self, job_id, payload):
         with self._lock:
             job = self._get(job_id)
+            if self._browser_job == job_id: raise RuntimeError('أغلق جلسة المتصفح قبل تغيير اتصال المهمة.')
             if self._active_id == job_id or job['status'] in ACTIVE or job['status'] == 'queued':
                 raise RuntimeError('أوقف المهمة وانتظر حفظ Checkpoint قبل تغيير اتصالها.')
             cfg = self.vpn.validate_policy(payload)
@@ -352,6 +373,38 @@ class JobManager:
     def vpn_premium(self, payload):
         return self._vpn_mutation(lambda: self.vpn.premium(payload))
 
+    def _browser_rpc(self, job_id, payload):
+        from .vpn_client import rpc
+        return rpc('browser', job_id=job_id, input=payload)
+
+    def browser_action(self, job_id, payload):
+        if not isinstance(payload,dict) or payload.get('action') not in {'start','stop','frame','click','key','text','scroll','verify'}:
+            raise ValueError('طلب المتصفح غير صالح.')
+        def operation():
+            job=self._get(job_id)
+            action=payload['action']
+            if job['status'] not in RESUMABLE and action!='stop': raise RuntimeError('أوقف المهمة وانتظر حفظ التقدم أولًا.')
+            if self._browser_job and self._browser_job != job_id: raise RuntimeError('أغلق جلسة المهمة الأخرى أولًا.')
+            if action=='start':
+                if set(payload)!={'action'}:raise ValueError('طلب بدء المتصفح غير صالح.')
+                if job['mode']!='html' or job.get('network_mode','direct')=='direct':raise RuntimeError('اختر HTML وملف VPN معزولًا لهذه المهمة أولًا.')
+                if not self._browser_job:
+                    prepared=self.vpn.prepare(job)
+                    self.store.update_job(job_id,**prepared)
+                from .engine import build_url
+                result=self._browser_rpc(job_id,{'action':'start','url':build_url(job['query'],'ip')})
+                self._browser_job=job_id
+                self.store.update_job(job_id,browser_session_enabled=True)
+            else:
+                result=self._browser_rpc(job_id,payload)
+                if action=='stop':
+                    self._browser_job=None
+            if action!='frame':self._browser_deadline=time.monotonic()+1800
+            if action in {'start','stop','verify'}:
+                self.vpn.audit('browser_'+action,job_id=job_id,verified=result.get('state')=='ready')
+            return result
+        return self._vpn_mutation(operation)
+
     def _network_wait(self, job_id, error):
         with self._lock:
             job = self._get(job_id)
@@ -373,6 +426,7 @@ class JobManager:
                 prepared = self.vpn.prepare(job)
             except (RuntimeError, ValueError) as exc:
                 self._network_wait(job['id'], exc)
+                if job.get('browser_session_enabled'): return
                 try:
                     prepared = self.vpn.recover(self._get(job['id']), initial_failure=True)
                 except (RuntimeError, ValueError):
@@ -390,6 +444,7 @@ class JobManager:
             if current['status'] != 'waiting_input' or current.get('input_reason') != 'network_error' or self._stop.is_set():
                 return
             self._network_wait(job['id'], current.get('error') or 'Network unavailable.')
+            if current.get('browser_session_enabled'): return
             try:
                 recovered = self.vpn.recover(self._get(job['id']))
             except (RuntimeError, ValueError):
