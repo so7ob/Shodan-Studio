@@ -1,0 +1,12 @@
+{
+  "schema_before": 0,
+  "schema_after": 1,
+  "existing_tables_unchanged": true,
+  "counts": {
+    "jobs": 4,
+    "job_ips": 750,
+    "users": 1,
+    "events": 2608
+  },
+  "backup_integrity": "ok"
+}

@@ -1,0 +1,29 @@
+{
+  "kind": "local-synthetic-AWG-lab",
+  "real_premium_test": false,
+  "host_management_before": true,
+  "awg3_handshake": true,
+  "curl_https_in_namespace": true,
+  "python_https_in_namespace": true,
+  "worker_unprivileged_zero_effective_capabilities": true,
+  "ssh_and_dashboard_during_tunnel": true,
+  "real_broker_worker_checkpoint_292_synthetic_ips": true,
+  "fail_closed_after_disconnect_python_and_curl": true,
+  "empty_namespace_leak_protection": true,
+  "ssh_and_dashboard_after_disconnect": true,
+  "host_state_restored": true,
+  "host_snapshot_before": {
+    "routes4": "a88882642a4c53d2807cc952c56ccb56e6378f32e2607ad13362ff0fd2d45b03",
+    "routes6": "5f744c3df0b852951be8a5bef0fb2e5a9533a8450cc411c794bda8f0cca07cb8",
+    "rules": "03d2c31fd2120382b3e6285f7409129b5bb93c56841dd3df92b5116e5cb5ccea",
+    "firewall": "ff9d0b668b765f8494a19863565aa617c39e603ef3f44352fee0f241135f4cf0",
+    "dns": "f5107060afa743c7bbbbde6bf8033200338d0df9f3d9e8dfabcd02258c923097"
+  },
+  "host_snapshot_after": {
+    "routes4": "a88882642a4c53d2807cc952c56ccb56e6378f32e2607ad13362ff0fd2d45b03",
+    "routes6": "5f744c3df0b852951be8a5bef0fb2e5a9533a8450cc411c794bda8f0cca07cb8",
+    "rules": "03d2c31fd2120382b3e6285f7409129b5bb93c56841dd3df92b5116e5cb5ccea",
+    "firewall": "ff9d0b668b765f8494a19863565aa617c39e603ef3f44352fee0f241135f4cf0",
+    "dns": "f5107060afa743c7bbbbde6bf8033200338d0df9f3d9e8dfabcd02258c923097"
+  }
+}

@@ -21,7 +21,7 @@ def utc_now() -> str:
 
 def _json(value: Any) -> str:
     """Do not accidentally persist credentials in job documents or events."""
-    forbidden = {"api_key", "api_key_resolved", "authorization", "cookie", "password", "setup_token"}
+    forbidden = {"api_key", "api_key_resolved", "authorization", "cookie", "password", "setup_token", "privatekey", "presharedkey", "private_key", "preshared_key", "headerprotectionkey"}
     def visit(item: Any, depth: int = 0) -> None:
         if depth > 40:
             raise ValueError("بيانات متداخلة أكثر من الحد المسموح.")
@@ -85,6 +85,8 @@ class Store:
                 );
             """)
         self.path.chmod(0o600)
+        from .vpn_schema import migrate
+        migrate(self.path)
         if self.setup_required():
             self._ensure_setup_token()
 

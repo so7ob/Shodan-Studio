@@ -197,6 +197,7 @@
     if (focusId) Array.from($("jobs-body").querySelectorAll("[data-job]")).find((node) => node.dataset.job === focusId)?.focus({ preventScroll: true });
   }
   function setView(view) {
+    ShodanVPN.workspace();
     state.view = view;
     $("job-filter").value = view;
     document.querySelectorAll("[data-view]").forEach((node) => node.classList.toggle("active", node.dataset.view === view));
@@ -212,6 +213,7 @@
       const data = await api("/api/jobs");
       state.jobs = Array.isArray(data.jobs) ? data.jobs : [];
       renderMetrics(); renderJobs(); setConnected(true);
+      await ShodanVPN.refresh();
       text("last-sync", `آخر تحديث ${new Date().toLocaleTimeString("ar", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}`);
       if (state.selectedId) await refreshDetail();
       else {
@@ -255,6 +257,7 @@
     return `<button class="button small ${css}" data-action="${action}"${disabled ? " disabled" : ""}>${icon(iconName)}${label}</button>`;
   }
   function renderDetail(job) {
+    ShodanVPN.renderJob(job);
     const s = getStats(job);
     text("detail-title", jobTitle(job)); text("detail-query", job.query || "");
     $("detail-status").innerHTML = badge(job.status);
@@ -411,7 +414,7 @@
     if (!dialog.open) dialog.showModal();
   }
   function openCreate() {
-    $("create-form").reset(); setFormError("create-error", "");
+    $("create-form").reset(); ShodanVPN.prepareCreate(); setFormError("create-error", "");
     $("create-form").elements.demo.checked = !!state.session?.demo;
     updateKeyField("create"); openDialog("create-dialog");
   }
@@ -539,7 +542,7 @@
       if (key && payload.mode !== "html") payload.api_key = key;
       $("create-submit").disabled = true;
       try {
-        const data = await post("/api/jobs", payload); fields.api_key.value = "";
+        const data = await post("/api/jobs", {...payload, network:ShodanVPN.createPolicy()}); fields.api_key.value = "";
         $("create-dialog").close(); toast("أُضيفت المهمة إلى طابور التنفيذ.");
         setView("all"); $("job-search").value = "";
         await refreshAll(); const job = data.job || data; if (job.id) await selectJob(job.id);
@@ -604,6 +607,7 @@
     document.addEventListener("keydown", (event) => { if (event.key === "Escape") closeSidebar(); });
     window.addEventListener("online", () => refreshAll());
   }
+  ShodanVPN.init({api, toast, closeSidebar, refreshAll, openResume, runAction, currentJob: id => state.jobs.find(j => j.id === id)});
   bindEvents(); loadSession();
   window.setInterval(() => { if (!document.hidden && state.session?.authenticated) refreshAll(); }, 2000);
   window.setInterval(updateCountdown, 1000);

@@ -16,6 +16,7 @@ import urllib.parse
 from . import engine
 from .config import settings_from, validate_key
 from .ip_progress import crawler_progress_inputs
+from .vpn_config import network_error
 
 
 def atomic_text(path: Path, content: str) -> None:
@@ -254,6 +255,28 @@ class StudioCrawler(engine.Crawler):
     def checkpoint(self, status=None):
         super().checkpoint(status)
         self.snapshot(force=True)
+
+    def _request_with_rate_limits(self, operation, template, label, counter=None):
+        # Retry at the existing request boundary so every attempt is budgeted,
+        # recorded, and cannot mark a failed page complete.
+        for attempt in range(3):
+            try:
+                result = super()._request_with_rate_limits(operation, template, label, counter)
+                if attempt:
+                    emit('network', phase='resuming_extraction', message='استعاد الطلب الاتصال.', error=None)
+                return result
+            except (engine.SpiderError, engine.ShodanAPIError, OSError) as exc:
+                category = network_error(exc)
+                if not category: raise
+                detail = engine.safe_detail(exc)
+                emit('network', phase='connection_lost', error=detail, message=detail)
+                self.checkpoint('network_retry')
+                if attempt == 2:
+                    self.input_reason = 'network_error'
+                    raise engine.PauseRequested(detail) from None
+                emit('network', phase='retry_scheduled', error=detail,
+                     message=f'إعادة محاولة الاتصال بعد {2 ** attempt} ثانية.')
+                self.interruptible_sleep(2 ** attempt)
 
     def read_page(self, query, facet, expected=None):
         self.check_control()

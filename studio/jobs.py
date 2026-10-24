@@ -24,6 +24,8 @@ from .config import JobValidationError, settings_from, validate_job, validate_ke
 from .store import Store, utc_now
 from .worker import atomic_text
 from .ip_progress import crawler_progress_inputs, progress_from_job
+from .vpn import VPNManager
+from .vpn_config import NETWORK_DEFAULTS
 
 
 FINAL = {"completed", "completed_warnings", "cancelled", "failed"}
@@ -36,6 +38,7 @@ class JobManager:
         self.data_dir = Path(data_dir).expanduser().resolve()
         self.store = store or Store(self.data_dir)
         self.demo = demo
+        self.vpn = VPNManager(self.store)
         self.jobs_dir = self.data_dir / "jobs"
         if self.jobs_dir.is_symlink():
             raise ValueError("مجلد المهام لا يقبل الروابط الرمزية.")
@@ -49,6 +52,7 @@ class JobManager:
         self._thread = None
         self._process = None
         self._active_id = None
+        self._network_operation = False
         self._ownership = None
         self._ip_cache = {}
         if autostart:
@@ -113,12 +117,15 @@ class JobManager:
                 self._secret_history.add(key)
 
     def _public(self, job):
-        result = dict(job)
+        result = {**NETWORK_DEFAULTS, "active_vpn_profile": None, "current_egress_ip": None,
+                  "network_health": "unknown", "last_network_error": None, "last_failover_at": None,
+                  "failover_count": 0, **job}
         result["ip_progress"] = progress_from_job(job)
         result.pop("_ip_progress_inputs", None)
         result.pop("_ip_progress_stored", None)
         with self._lock:
             result["has_key"] = result["id"] in self._keys
+            result["network_busy"] = self._active_id == result["id"]
         path = self._path(result["id"])
         result["has_checkpoint"] = (path / "checkpoint.json").is_file()
         result["has_results"] = bool(result.get("stats", {}).get("unique_ips")) or (path / "live-ips.txt").is_file() or (path / "result.txt").is_file()
@@ -133,6 +140,8 @@ class JobManager:
         with self.store.connection() as con:
             jobs = [json.loads(row[0]) for row in con.execute("SELECT document FROM jobs")]
         for job in jobs:
+            if job.get("network_mode", "direct") != "direct" and job["status"] not in FINAL:
+                self.store.update_job(job["id"], network_health="unknown", current_egress_ip=None, network_phase="checking_network")
             # Also reconcile finished jobs: an older release may have written
             # their files during a rollback, leaving the additive SQLite table
             # behind. Startup is offline; normal dashboard polls do no scanning.
@@ -188,6 +197,7 @@ class JobManager:
         return self._public(self._get(job_id))
 
     def _new_job(self, fields, key, *, start=True):
+        fields = {**NETWORK_DEFAULTS, **fields}
         job_id = secrets.token_hex(16)
         path = self._path(job_id)
         path.mkdir(mode=0o700)
@@ -215,6 +225,7 @@ class JobManager:
 
     def create_job(self, payload):
         fields, key = validate_job(payload, allow_demo=self.demo)
+        self.vpn.validate_policy({k: fields[k] for k in NETWORK_DEFAULTS})
         with self._lock:
             return self._new_job(fields, key)
 
@@ -230,6 +241,7 @@ class JobManager:
             state = job["status"]
             if action == "duplicate":
                 fields = {k: job[k] for k in ("title", "query", "mode", "settings", "priority")}
+                fields.update({k: job.get(k, v) for k, v in NETWORK_DEFAULTS.items()})
                 fields["title"] = fields["title"][:150] + " — نسخة"
                 key = validate_key(payload.get("api_key")) or self._keys.get(job_id)
                 if key and (any(key in fields[name] for name in ("title", "query")) or key in fields["settings"]["user_agent"]):
@@ -260,6 +272,8 @@ class JobManager:
                     self.store.update_job(job_id, status="cancelled", finished_at=utc_now())
                     self._keys.pop(job_id, None)
             elif action == "resume":
+                if self._active_id == job_id and job.get("network_mode", "direct") != "direct":
+                    raise RuntimeError("جارٍ حفظ التقدم أو التحقق من الشبكة؛ انتظر انتهاء العملية.")
                 if state not in RESUMABLE:
                     raise JobValidationError("يمكن الاستكمال بعد توقف المهمة فقط.")
                 key = validate_key(payload.get("api_key")) or self._keys.get(job_id)
@@ -290,7 +304,7 @@ class JobManager:
                 with self._lock:
                     if self._stop.is_set():
                         break
-                    job = self.store.claim_next()
+                    job = None if self._network_operation else self.store.claim_next()
                     if job:
                         self._active_id = job["id"]
                 if job:
@@ -306,7 +320,85 @@ class JobManager:
             self._wake.wait(0.5)
             self._wake.clear()
 
+    def network_settings(self, job_id, payload):
+        with self._lock:
+            job = self._get(job_id)
+            if self._active_id == job_id or job['status'] in ACTIVE or job['status'] == 'queued':
+                raise RuntimeError('أوقف المهمة وانتظر حفظ Checkpoint قبل تغيير اتصالها.')
+            cfg = self.vpn.validate_policy(payload)
+            self.store.update_job(job_id, **cfg, active_vpn_profile=None,
+                                  current_egress_ip=None, network_health='unknown')
+            self.vpn.audit('job_network_settings', job_id=job_id, new=cfg['preferred_vpn_profile'])
+            return self.get_job(job_id)
+
+    def _vpn_mutation(self, operation):
+        with self._lock:
+            if self._active_id or self._network_operation:
+                raise RuntimeError('توجد مهمة أو عملية اتصال نشطة؛ انتظر اكتمالها أولًا.')
+            self._network_operation = True
+        try:
+            return operation()
+        finally:
+            with self._lock:
+                self._network_operation = False
+            self._wake.set()
+
+    def vpn_action(self, payload):
+        return self._vpn_mutation(lambda: self.vpn.action(payload))
+
+    def vpn_update(self, ident, payload):
+        return self._vpn_mutation(lambda: self.vpn.update(ident, payload))
+
+    def _network_wait(self, job_id, error):
+        with self._lock:
+            job = self._get(job_id)
+            state = 'cancelled' if job['status'] in ('cancel_requested', 'cancelled') else 'paused' if job['status'] in ('pause_requested', 'paused') else 'waiting_input'
+            self.store.update_job(job_id, status=state, network_health='unhealthy', network_phase='connection_lost',
+                                  input_reason='network_error', error=str(error), last_network_error=str(error),
+                                  current_egress_ip=None)
+            self.store.append_event(job_id, {'kind': 'network', 'level': 'warning', 'message': str(error),
+                                            'phase': 'connection_lost'})
+
     def _execute(self, job):
+        if job.get('network_mode', 'direct') == 'direct':
+            self.store.update_job(job['id'], **self.vpn.prepare(job))
+            return self._execute_worker(self._get(job['id']))
+        while not self._stop.is_set():
+            job = self._get(job['id'])
+            try:
+                self.store.update_job(job['id'], network_phase='checking_network')
+                prepared = self.vpn.prepare(job)
+            except (RuntimeError, ValueError) as exc:
+                self._network_wait(job['id'], exc)
+                try:
+                    prepared = self.vpn.recover(self._get(job['id']), initial_failure=True)
+                except (RuntimeError, ValueError):
+                    prepared = None
+                if not prepared: return
+            with self._lock:
+                current = self._get(job['id'])
+                if current['status'] in ('cancelled', 'paused', 'cancel_requested', 'pause_requested') or self._stop.is_set():
+                    if current['status'] in ('cancel_requested', 'pause_requested'):
+                        self.store.update_job(job['id'], status='cancelled' if current['status'] == 'cancel_requested' else 'paused')
+                    return
+                self.store.update_job(job['id'], **prepared, status='running', error=None, input_reason=None)
+            self._execute_worker(self._get(job['id']))
+            current = self._get(job['id'])
+            if current['status'] != 'waiting_input' or current.get('input_reason') != 'network_error' or self._stop.is_set():
+                return
+            self._network_wait(job['id'], current.get('error') or 'Network unavailable.')
+            try:
+                recovered = self.vpn.recover(self._get(job['id']))
+            except (RuntimeError, ValueError):
+                recovered = None
+            if not recovered: return
+            with self._lock:
+                latest = self._get(job['id'])
+                if latest['status'] != 'waiting_input' or self._stop.is_set():
+                    return
+                self.store.update_job(job['id'], **recovered, status='running')
+
+    def _execute_worker(self, job):
         job_id, path = job["id"], self._path(job["id"])
         with self._lock:
             key = self._keys.get(job_id)
@@ -326,6 +418,8 @@ class JobManager:
         env["PYTHONUNBUFFERED"] = "1"
         env["PYTHONDONTWRITEBYTECODE"] = "1"
         command = [sys.executable, "-m", "studio.worker", "--job-dir", str(path)]
+        if job.get("network_mode", "direct") != "direct":
+            command = [sys.executable, "-m", "studio.vpn_client", "--job-id", job_id]
         # No shell, user-controlled executable, credential argv, or target URL.
         process = subprocess.Popen(command, cwd=Path(__file__).resolve().parent.parent,
                                    stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -355,6 +449,8 @@ class JobManager:
                 with self._lock:
                     current = self._get(job_id)
                     changes = {}
+                    if kind == "network":
+                        changes.update(network_phase=event.get("phase"), last_network_error=event.get("error"))
                     if isinstance(event.get("stats"), dict):
                         changes["stats"] = event["stats"]
                         if event["stats"].get("source") in ("api", "html"):
@@ -369,6 +465,7 @@ class JobManager:
                             state = "completed"
                         if state not in FINAL | RESUMABLE:
                             state = "failed"
+                        changes["network_phase"] = "completed" if state.startswith("completed") else "connection_lost" if event.get("input_reason") == "network_error" else state
                         changes.update(status=state, error=event.get("error"), input_reason=event.get("input_reason"),
                                        finished_at=utc_now() if state in FINAL else None)
                     if changes:
@@ -460,7 +557,13 @@ class JobManager:
                 raise JobValidationError("الملف غير متاح بعد؛ يُحفظ التقرير عند نهاية التنفيذ أو التوقف.")
             if path.stat().st_size > 64 * 1024 * 1024:
                 raise JobValidationError("الملف أكبر من الحد المسموح للتنزيل.")
-            return path.read_bytes(), "application/json; charset=utf-8", name + "." + format_name + ".json"
+            content = path.read_bytes()
+            if format_name == "report":
+                report = json.loads(content)
+                report["job_network"] = {k: job.get(k) for k in (*NETWORK_DEFAULTS, "active_vpn_profile", "current_egress_ip", "network_health", "last_network_error", "failover_count")}
+                report["network_events"] = self.vpn.events(job_id)
+                content = json.dumps(report, ensure_ascii=False, indent=2).encode()
+            return content, "application/json; charset=utf-8", name + "." + format_name + ".json"
         ips = self._result_ips(job_id)
         if format_name == "txt":
             return ("".join(ip + "\n" for ip in ips)).encode(), "text/plain; charset=utf-8", name + ".txt"

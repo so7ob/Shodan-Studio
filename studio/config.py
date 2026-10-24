@@ -102,7 +102,7 @@ def settings_from(payload: Any, *, allow_demo=False) -> dict:
 def validate_job(payload: Any, *, allow_demo=False) -> tuple[dict, str | None]:
     if not isinstance(payload, dict):
         raise JobValidationError("المهمة يجب أن تكون كائنًا.")
-    if set(payload) - {"title", "query", "mode", "api_key", "settings", "priority"}:
+    if set(payload) - {"title", "query", "mode", "api_key", "settings", "priority", "network"}:
         raise JobValidationError("توجد حقول غير مدعومة في المهمة.")
     query = text(payload.get("query"), "استعلام Shodan", 8192)
     try:
@@ -121,4 +121,5 @@ def validate_job(payload: Any, *, allow_demo=False) -> tuple[dict, str | None]:
     # Catch pasted credentials in a public title/query before any persistence.
     if key and (key in query or key in title or key in settings["user_agent"]):
         raise JobValidationError("ضع مفتاح API في حقل المفتاح فقط.")
-    return {"title": title, "query": query, "mode": mode, "settings": settings, "priority": priority}, key
+    from .vpn_config import policy
+    return {"title": title, "query": query, "mode": mode, "settings": settings, "priority": priority, **policy(payload.get("network"))}, key

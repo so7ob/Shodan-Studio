@@ -127,3 +127,25 @@ keep loopback binding and use SSH port forwarding.
 a correctly configured proxy. It does not add TLS to the Python listener or make
 the standard-library reference HTTP server a hardened public production stack.
 For the installation steps and backup instructions, see `README_AR.md`.
+
+## VPN extension (1.2)
+
+`vpn_config.py` parses policy/config data; `vpn.py` owns the provider interface,
+public registry, health/cooldown and durable audit. `vpn_helper.py` owns only the
+fixed namespace/interface and approved root-only files. `vpn_client.py` bridges
+worker stdin/events over an authenticated Unix socket. The helper enters the
+namespace then drops privileges before launching the existing worker. Neither
+curl nor Python gets a host network fallback. `vpn_probe.py` has fixed, bounded
+probes. Metadata migration is additive and backup-first (`vpn_schema.py`).
+
+The existing one-worker queue remains authoritative. Bounded request retries
+occur at the engine request boundary and retain budget accounting. Switching
+occurs only after worker exit/atomic checkpoint persistence. Failed health,
+profile cooldowns, allowlists, and a persisted lifetime switch budget govern
+recovery. HTTP permission/quota/rate limiting is not a VPN-switch signal.
+A helper lease rejects concurrent switches while its worker is alive. Restarted
+jobs retain results and lose stale verified-health claims.
+
+See [VPN operating guide](docs/VPN_MANAGER_AR.md),
+[deployment and rollback](docs/VPN_DEPLOYMENT_AR.md), and
+[discovery/design evidence](docs/VPN_DISCOVERY.md).
