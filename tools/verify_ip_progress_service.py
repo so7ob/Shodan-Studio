@@ -21,6 +21,7 @@ import urllib.request
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+from studio import __version__
 from studio.jobs import JobManager
 
 
@@ -84,10 +85,11 @@ def main():
     def ready():
         for _ in range(100):
             try:
-                if request("/health")["ok"]:
+                if request("/health") == {"ok": True, "version": __version__}:
                     return
             except OSError:
-                time.sleep(.1)
+                pass
+            time.sleep(.1)
         raise AssertionError("test service failed readiness")
     def wait_job(job_id):
         for _ in range(200):
@@ -128,7 +130,7 @@ def main():
             assert con.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
             assert con.execute("SELECT COUNT(*) FROM job_ips WHERE job_id=?", (demo["id"],)).fetchone()[0] == 292
         print(json.dumps({"os": "Debian 12", "python": sys.version.split()[0], "unit": unit.name,
-            "service": systemctl("is-active", unit.name), "restart_checks": 2,
+            "service": systemctl("is-active", unit.name), "health": request("/health"), "restart_checks": 2,
             "fixture": p, "partial_ips": 98, "final_ips": 292, "demo_requests": 9,
             "integrity_check": "ok", "shodan_network_requests": 0}, ensure_ascii=False), flush=True)
         if args.browser:

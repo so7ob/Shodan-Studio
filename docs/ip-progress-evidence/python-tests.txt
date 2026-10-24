@@ -116,6 +116,6 @@ test_api_429_preserves_retry_after_and_resume_sends_no_early_request (test_worke
 test_api_then_html_403_waits_for_user_after_two_attempts (test_worker.WorkerRecoveryTests.test_api_then_html_403_waits_for_user_after_two_attempts) ... ok
 
 ----------------------------------------------------------------------
-Ran 108 tests in 43.534s
+Ran 108 tests in 41.231s
 
 OK

@@ -153,7 +153,15 @@ class DurableProgressTests(unittest.TestCase):
         p = result["ip_progress"]
         self.assertEqual((p["extracted_unique_ips"], p["progress_percent"]), (292, 100))
         self.assertEqual(result["stats"]["requests"], 9)
-        events = self.manager.store.events(job["id"], limit=1000)["events"]
+        # The final job update commits before its event is appended. Wait for
+        # that asynchronous append rather than comparing the previous event.
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            events = self.manager.store.events(job["id"], limit=1000)["events"]
+            if events and events[-1]["kind"] == "final":
+                break
+            time.sleep(.01)
+        self.assertEqual(events[-1]["kind"], "final")
         self.assertFalse(any(event["kind"] == "ip_batch" for event in events))
         self.assertEqual(events[-1]["ip_progress"], p)
         with self.manager.store.connection() as con:

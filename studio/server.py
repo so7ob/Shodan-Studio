@@ -23,10 +23,10 @@ from typing import Any
 from urllib.parse import parse_qs, quote, urlsplit
 from wsgiref.simple_server import WSGIRequestHandler, WSGIServer, make_server
 
+from . import __version__ as VERSION
 from .store import Store
 
 
-VERSION = "1.0.0"
 COOKIE_NAME = "studio_session"
 MAX_BODY = 32 * 1024 * 1024
 JOB_ID = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
