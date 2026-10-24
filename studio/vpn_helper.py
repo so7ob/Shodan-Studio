@@ -98,6 +98,13 @@ class Broker:
             if run.returncode or not result.get('ok'):
                 from .premium import fail, ERRORS
                 fail(result.get('code') if result.get('code') in ERRORS else 'NETWORK')
+            # Remember only an index into root-approved origins, never an origin
+            # supplied by a subprocess or remote response. Survives restarts.
+            index = result.get('gateway_index')
+            transport = self.premium.state.get('transport', {})
+            if type(index) is int and 0 <= index < min(6, len(transport.get('endpoints', []))):
+                transport['preferred_index'] = index
+                self.premium.save()
             return result['result']
         except (OSError, ValueError, subprocess.TimeoutExpired):
             from .premium import fail
@@ -212,6 +219,8 @@ class Broker:
         self.last_check = None
 
     def _connect(self, ident):
+        started = time.monotonic()
+        timings = {}
         profile_id(ident)
         if ident not in self.profiles or not self.profiles[ident]['enabled']:
             raise ValueError('VPN profile unavailable or disabled.')
@@ -225,6 +234,8 @@ class Broker:
             parsed = parse_profile(raw)
         else:
             parsed = parse_profile(self._path(ident).read_text())
+        timings['configuration_ms'] = round((time.monotonic() - started) * 1000)
+        setup_started = time.monotonic()
         tool = self._tool(parsed['protocol'])
         # Reusing an active host key can make the peer roam away from SSH's VPN.
         # Compare public keys only, without exposing either key in responses.
@@ -259,7 +270,13 @@ class Broker:
                 command([IP, '-n', NS, f'-{version}', 'route', 'add', 'default', 'dev', IFACE])
             self.active = ident
             self.last_change = time.time()
-            return self._verify_connection()
+            timings['interface_ms'] = round((time.monotonic() - setup_started) * 1000)
+            verify_started = time.monotonic()
+            report = self._verify_connection()
+            timings['verification_ms'] = round((time.monotonic() - verify_started) * 1000)
+            timings['total_ms'] = round((time.monotonic() - started) * 1000)
+            report['connection_timings'] = timings
+            return report
         except Exception:
             failed_check = self.last_check
             self._remove_interface()
@@ -281,7 +298,7 @@ class Broker:
     def switch_profile(self, ident):
         old = self.active
         if old == ident:
-            check = self.health_check()
+            check = self.launch_check()
             if check['healthy']:
                 return check
         try:
@@ -338,7 +355,7 @@ class Broker:
                                   "premium_subscription": True}, premium=self.premium.status(),
                     verified=verified, busy=busy, last_check=self.last_check, **isolation)
 
-    def health_check(self, scope='worker'):
+    def health_check(self, scope='worker', *, source_check=False):
         if scope not in {'host', 'worker'}:
             raise ValueError('Invalid diagnostic scope.')
         isolated = scope == 'worker'
@@ -347,7 +364,7 @@ class Broker:
             result = dict(scope=scope, healthy=False, error='VPN_NOT_READY', egress_ip=None, **isolation)
         else:
             try:
-                run = subprocess.run(self._unprivileged('studio.vpn_probe', isolated=isolated),
+                run = subprocess.run(self._unprivileged('studio.vpn_probe', *(['--source'] if source_check else []), isolated=isolated),
                                      capture_output=True, text=True, timeout=22, env=ENV, cwd=self.code)
                 result = json.loads(run.stdout) if run.returncode == 0 else {'healthy': False, 'error': 'PROBE_FAILED'}
             except (subprocess.TimeoutExpired, OSError, ValueError):
@@ -373,12 +390,26 @@ class Broker:
 
     verify_tunnel = health_check
 
+    def launch_check(self):
+        """Reuse a just-completed probe, while rechecking the actual isolation.
+
+        A worker launch immediately follows prepare/connect. Repeating both TLS
+        requests adds seconds without adding leak protection. Cached results are
+        usable for ten seconds, for this tunnel only; removal clears last_check.
+        """
+        check = self.last_check
+        if self.active and check and check.get('healthy') and 0 <= time.time() - check.get('checked_at', 0) < 10:
+            isolation = self._isolation()
+            if all(isolation.get(k) for k in ('interface_up', 'route_verified', 'leak_protection')):
+                return dict(check, **isolation)
+        return self.health_check()
+
     def get_egress_ip(self):
         return self.health_check().get('egress_ip')
 
     def dispatch(self, request):
         op = request.get('op')
-        allowed = {'profiles': set(), 'discover': set(), 'status': set(), 'health': {'scope'},
+        allowed = {'profiles': set(), 'discover': set(), 'status': set(), 'health': {'scope'}, 'diagnostics': {'scope'},
                    'import': {'config', 'metadata'}, 'import_existing': {'source', 'metadata'},
                    'update': {'profile_id', 'metadata'}, 'connect': {'profile_id'},
                    'disconnect': set(), 'restore': set(), 'premium_refresh': set(), 'premium_enroll': {'key'}}
@@ -404,7 +435,8 @@ class Broker:
                 self._sync_premium()
                 self._save()
                 return result
-            if op == 'health': return self.health_check(request.get('scope', 'worker'))
+            if op in {'health', 'diagnostics'}:
+                return self.health_check(request.get('scope', 'worker'), source_check=op == 'diagnostics')
             if op == 'import': return self.add(request['config'], request['metadata'])
             if op == 'import_existing': return self.import_existing(request['source'], request['metadata'])
             if op == 'update':
@@ -435,7 +467,7 @@ class Broker:
             if payload['job']['id'] != ident or payload['job'].get('active_vpn_profile') != self.active or not self.active:
                 raise ValueError('Worker profile does not match the verified tunnel.')
             # Revalidate at launch, not merely at the earlier browser action.
-            if not self.health_check()['healthy']:
+            if not self.launch_check()['healthy']:
                 raise RuntimeError('Tunnel health verification failed before worker launch.')
             path = self.data / 'jobs' / ident
             if path.is_symlink() or not path.is_dir():
@@ -533,7 +565,7 @@ def main():
         def monitor():
             while not monitor_stop.wait(30):
                 with broker.lock:
-                    if broker.active:
+                    if broker.active and (not broker.last_check or time.time() - broker.last_check.get('checked_at', 0) >= 25):
                         with contextlib.suppress(Exception): broker.health_check()
         threading.Thread(target=monitor, daemon=True).start()
         try: server.serve_forever(.2)

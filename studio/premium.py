@@ -194,6 +194,9 @@ def validate_transport(config):
 class Gateway:
     def __init__(self, config):
         self.pem, self.endpoints = validate_transport(config)
+        preferred = config.get('preferred_index')
+        self.preferred_index = preferred if type(preferred) is int and 0 <= preferred < min(6, len(self.endpoints)) else None
+        self.successful_index = None
 
     def __call__(self, operation, payload):
         if operation not in {'account_info', 'config'}:
@@ -202,7 +205,13 @@ class Gateway:
         deadline = time.monotonic() + 24
         request_id = str(uuid.uuid4())
         # No redirects, proxies from environment, arbitrary paths, or export calls.
-        for endpoint in self.endpoints[:6]:
+        order = list(range(min(6, len(self.endpoints))))
+        preferred = getattr(self, 'preferred_index', None)
+        if preferred in order:
+            order.remove(preferred)
+            order.insert(0, preferred)
+        for index in order:
+            endpoint = self.endpoints[index]
             connection = None
             try:
                 host = urlsplit(endpoint).hostname
@@ -233,6 +242,7 @@ class Gateway:
                     if isinstance(error, dict): check_error(error, reply.status)
                     fail('RESPONSE')
                 check_error(result, reply.status)
+                self.successful_index = index
                 return result
             except (OSError, http.client.HTTPException):
                 continue
@@ -388,8 +398,9 @@ def gateway_main():
         raw = sys.stdin.buffer.read(MAX_BYTES + 1)
         if len(raw) > MAX_BYTES: fail('RESPONSE')
         request = json.loads(raw)
-        result = Gateway(request['transport'])(request['operation'], request['payload'])
-        print(json.dumps({'ok': True, 'result': result}))
+        gateway = Gateway(request['transport'])
+        result = gateway(request['operation'], request['payload'])
+        print(json.dumps({'ok': True, 'result': result, 'gateway_index': gateway.successful_index}))
     except Exception as exc:
         code = next((k for k in ERRORS if str(exc).startswith('[PREMIUM_' + k + ']')), 'NETWORK')
         print(json.dumps({'ok': False, 'code': code}))

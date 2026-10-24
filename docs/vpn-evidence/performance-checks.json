@@ -1,0 +1,17 @@
+{
+  "python": {
+    "passed": 165,
+    "duration_seconds": 47.321,
+    "suite": "python3 -m unittest discover -s tests"
+  },
+  "javascript": {
+    "passed": 11,
+    "suite": "node --test tests/test_ip_progress.mjs"
+  },
+  "browser": "source-access-browser.json",
+  "installer_checks": true,
+  "javascript_syntax": true,
+  "diff_check": true,
+  "live_shodan_search_succeeded": false,
+  "live_html_error": "HTTP_403 BROWSER_CHALLENGE"
+}

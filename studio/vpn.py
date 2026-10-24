@@ -34,6 +34,7 @@ class HelperProvider:
     switch_profile = connect
     def disconnect(self): return rpc('disconnect')
     def health_check(self, scope='worker'): return rpc('health', scope=scope)
+    def diagnostics(self, scope='worker'): return rpc('diagnostics', scope=scope)
     verify_tunnel = health_check
     def get_egress_ip(self): return self.health_check().get('egress_ip')
     def restore_previous_state(self): return rpc('restore')
@@ -242,7 +243,7 @@ class VPNManager:
             if self.clock() - self._diag_at.get(scope, -100) < 5:
                 raise RuntimeError('انتظر خمس ثوانٍ قبل إعادة الاختبار.')
             self._diag_at[scope] = self.clock()
-            result = self.provider.health_check(scope)
+            result = getattr(self.provider, 'diagnostics', self.provider.health_check)(scope)
             if scope == 'worker':
                 ident = self.provider.get_status().get('active_profile')
                 if ident: self._record_check(ident, result)

@@ -1,0 +1,20 @@
+{
+  "provider": "simulated",
+  "htmlPreserved": true,
+  "challengeShown": true,
+  "healthyTunnelAndBlockedWebsite": true,
+  "keyboardJobEntry": true,
+  "widths": [
+    {
+      "width": 1280,
+      "axeViolations": 0,
+      "noOverflow": true
+    },
+    {
+      "width": 375,
+      "axeViolations": 0,
+      "noOverflow": true
+    }
+  ],
+  "errors": []
+}

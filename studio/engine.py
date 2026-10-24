@@ -1991,6 +1991,8 @@ def http_failure(code: int, headers: Message | None = None) -> SpiderError:
     if 300 <= code <= 399:
         return SpiderError(f"[HTTP_{code}] Redirect, possibly to login; redirects are not followed.", http_status=code)
     if code in (401, 403):
+        if headers is not None and headers.get('cf-mitigated', '').lower() == 'challenge':
+            return SpiderError(f"[HTTP_{code}] [BROWSER_CHALLENGE] Shodan requires interactive browser verification. HTML extraction is paused; VPN connectivity does not grant website access.", http_status=code)
         return SpiderError(f"[HTTP_{code}] Access denied; website login/membership or browser verification may be required.", http_status=code)
     if code == 407:
         return SpiderError("[HTTP_407] The configured proxy requires authentication.", http_status=code)

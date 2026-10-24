@@ -17,6 +17,7 @@ from test_premium import BrowserPremiumProvider
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--premium', action='store_true')
+    parser.add_argument('--source-denial', action='store_true')
     parser.add_argument('--port', type=int, default=8792)
     args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix='studio-browser-fixture-') as folder:
@@ -24,6 +25,13 @@ def main():
         store.setup(store.setup_token(), 'acceptance', 'local-browser-fixture-123!')
         manager = JobManager(folder, store=store, autostart=False, demo=True)
         manager.vpn = VPNManager(store, BrowserPremiumProvider() if args.premium else FakeProvider())
+        if args.source_denial:
+            from test_vpn import GOOD
+            manager.vpn.provider.diagnostics = lambda scope: dict(GOOD, scope=scope,
+                source_access='browser_challenge', source_http_status=403)
+            job = manager.create_job(dict(title='HTML denial fixture',query='fixture',mode='html',settings={'demo':True}))
+            store.update_job(job['id'],status='waiting_input',input_reason='source_error',
+                error='[HTTP_403] [BROWSER_CHALLENGE] Interactive verification required.',network_health='healthy')
         app = create_app(folder, manager=manager, autostart=False, demo=True,
                          allowed_hosts=(f'127.0.0.1:{args.port}',))
         try:

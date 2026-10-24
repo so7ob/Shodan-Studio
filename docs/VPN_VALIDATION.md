@@ -1,8 +1,20 @@
 # VPN Manager / Premium validation — 2026-10-24
 
-## Delivered on Debian 12
+## Follow-up: switching latency and HTML access
 
-Version **1.3.0** is installed in the existing Shodan Studio service. The original
+Version **1.3.1** follows the original acceptance below. It remembers the last
+working approved gateway, probes independent targets concurrently, resolves the
+Shodan name once per check, and reuses a just-completed health check at worker
+launch while revalidating isolation. Explicit diagnostics and both HTML transports
+recognize Cloudflare challenge headers without treating a website denial as a
+VPN fault. See [follow-up evidence and limitations](VPN_PERFORMANCE_AR.md).
+
+The 1.3.0 evidence below is historical; it is not a claim that live HTML searches
+succeed. A subsequent real HTML request was denied by Shodan.
+
+## Original 1.3.0 delivery on Debian 12
+
+Version **1.3.0** was installed in the existing Shodan Studio service. The original
 Python/SQLite/buildless Arabic RTL application, queue, checkpoints and results
 remain. Premium support targets the installed AmneziaVPN **5.0.3.0** protocol;
 it is source-compatible integration, not a public vendor SDK.
@@ -77,7 +89,7 @@ loopback-only synthetic credentials. This test never contacts Premium.
 
 ## Deployment and data preservation
 
-`/health` returns `{"ok":true,"version":"1.3.0"}`. The upgrade retained **4 jobs,
+At that deployment, `/health` returned `{"ok":true,"version":"1.3.0"}`. The upgrade retained **4 jobs,
 750 per-job IP records, 1 user and 2,689 events**, with byte-identical job files.
 The schema remains at version 1; Premium requires no extra migration. The initial
 VPN schema migration and original 1.2 deployment are recorded separately in

@@ -1,0 +1,29 @@
+{
+  "deployed": true,
+  "version": "1.3.1",
+  "previous_release": "/opt/shodan-studio/releases/release-tyHG4jeH",
+  "current_release": "/opt/shodan-studio/releases/release-pUdq4T6C",
+  "backup": "/var/backups/shodan-studio/pre-performance-20261024-203119.tar.gz",
+  "counts_before": {
+    "jobs": 4,
+    "job_ips": 750,
+    "users": 1,
+    "events": 2791
+  },
+  "counts_after": {
+    "jobs": 4,
+    "job_ips": 750,
+    "users": 1,
+    "events": 2791
+  },
+  "job_files_unchanged": true,
+  "schema_version": 1,
+  "health": {
+    "ok": true,
+    "version": "1.3.1"
+  },
+  "helper_active": true,
+  "amnezia_and_ssh_pids_unchanged": true,
+  "premium_profile_connected": false,
+  "backup_sqlite_restore_checked": true
+}

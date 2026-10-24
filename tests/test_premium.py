@@ -127,6 +127,16 @@ class PremiumTests(unittest.TestCase):
         for code in ('xx','../de','not-in-account'):
             with self.assertRaises(ValueError): self.premium.configuration(code)
         self.assertEqual(self.service.calls,[])
+
+    def test_broker_persists_only_valid_gateway_index_without_exposing_it(self):
+        broker=object.__new__(Broker);broker.premium=self.premium;broker.code=self.root
+        self.premium.state['transport']={'endpoints':['https://one.example','https://two.example']}
+        for index,expected in [(1,1),(99,1),('https://attacker.invalid',1)]:
+            response=MagicMock(returncode=0,stdout=json.dumps({'ok':True,'result':{},'gateway_index':index}))
+            with patch.object(broker,'_unprivileged',return_value=['fixed']),patch('studio.vpn_helper.subprocess.run',return_value=response):
+                broker._premium_request('account_info',{})
+            self.assertEqual(self.adapter().state['transport']['preferred_index'],expected)
+        self.assertNotIn('transport',self.premium.status())
     def test_account_limit_auth_expiry_captcha_rate_and_update_cooldown_survive_restart(self):
         for response,code in [({'http_status':409},'LIMIT'),({'http_status':403},'AUTH'),
                               ({'http_status':402},'EXPIRED'),({'http_status':402,'captcha_id':'secret'},'CAPTCHA'),
@@ -247,11 +257,32 @@ class CryptoTests(unittest.TestCase):
         with patch('studio.premium.PUBLIC_KEY_SHA256',hashlib.sha256(pem).hexdigest()),\
              patch('studio.premium.socket.getaddrinfo',return_value=[(2,1,6,'',('1.1.1.1',443))]),\
              patch('studio.premium.http.client.HTTPSConnection',side_effect=connection):
-            result=Gateway(config)('account_info',{'auth_data':{'api_key':TOKEN}})
+            gateway=Gateway(config)
+            result=gateway('account_info',{'auth_data':{'api_key':TOKEN}})
+            self.assertEqual(gateway.successful_index,1)
+            preferred=Gateway(dict(config,preferred_index=1))
+            preferred('account_info',{'auth_data':{'api_key':TOKEN}})
+            self.assertEqual([x[0] for x in calls],['old.example','working.example','working.example'])
+            calls.pop()
+            self.assertIsNone(Gateway(dict(config,preferred_index='https://attacker.invalid')).preferred_index)
+            self.assertIsNone(Gateway(dict(config,preferred_index=99)).preferred_index)
         self.assertEqual(result,{'active_device_count':2})
         self.assertEqual([x[2] for x in calls],['/v1/account_info']*2)
         self.assertEqual(calls[0][4]['X-Client-Request-ID'],calls[1][4]['X-Client-Request-ID'])
         self.assertEqual(calls[0][3],calls[1][3])
+
+    def test_failed_preferred_gateway_falls_back_to_approved_origin(self):
+        gateway=object.__new__(Gateway);gateway.pem=b'unused'
+        gateway.endpoints=['https://good.example','https://bad.example'];gateway.preferred_index=1
+        response=MagicMock();response.status=200;response.read1.side_effect=[b'encrypted',b'']
+        connection=MagicMock();connection.getresponse.return_value=response
+        with patch('studio.premium.encrypt_payload',return_value=(b'encrypted',b'k'*32,b'i'*32)),\
+             patch('studio.premium.decrypt_payload',return_value={'active_device_count':2}),\
+             patch('studio.premium.socket.getaddrinfo',return_value=[(2,1,6,'',('1.1.1.1',443))]),\
+             patch('studio.premium.http.client.HTTPSConnection',side_effect=[OSError(),connection]) as connect:
+            self.assertEqual(gateway('account_info',{}),{'active_device_count':2})
+        self.assertEqual([c.args[0] for c in connect.call_args_list],['bad.example','good.example'])
+        self.assertEqual(gateway.successful_index,0)
 
     def test_https_cleartext_success_and_private_dns_are_rejected(self):
         gateway=object.__new__(Gateway);gateway.pem=b'unused';gateway.endpoints=['https://fixture.example']

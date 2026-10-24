@@ -123,8 +123,11 @@ window.ShodanVPN = (() => {
     $('job-network-state').textContent = `${job.network_mode || 'direct'} · ${p?.name || (job.network_mode && job.network_mode !== 'direct' ? 'ملف VPN غير متاح' : 'مسار الخادم')} · ${country(p?.country)} · ${job.current_egress_ip || 'عنوان الخروج غير متحقق'} · ${health[job.network_health] || 'غير مختبر'}`;
     $('job-network-phase').textContent = phases[job.network_phase] || '';
     $('job-network-count').textContent = `محاولات التبديل: ${job.failover_count || 0} / ${job.max_failovers ?? 2}`;
-    $('job-network-error').textContent = job.last_network_error || '';
-    $('job-network-error').hidden = !job.last_network_error;
+    const sourceDenied = /\[HTTP_(401|403)\]/.test(job.error || '') && job.mode === 'html';
+    $('job-network-error').textContent = sourceDenied
+      ? 'رفض Shodan طلب HTML' + ((job.error || '').includes('[BROWSER_CHALLENGE]') ? ' بسبب تحقق متصفح تفاعلي' : ' (HTTP 401/403)') + '. نجاح النفق لا يثبت السماح بالبحث. بقيت النتائج ونقطة الاستكمال محفوظة. افحص وصول الموقع من صفحة التشخيص؛ إعادة الاستكمال ستعيد الطلب وقد تُرفض مجددًا.'
+      : job.last_network_error || '';
+    $('job-network-error').hidden = !sourceDenied && !job.last_network_error;
     const busy = job.network_busy || ['running','queued','pause_requested','cancel_requested'].includes(job.status);
     $('job-network-edit').disabled = busy;
     $('job-network-restore').disabled = busy || !job.previous_vpn_profile;
@@ -149,9 +152,13 @@ window.ShodanVPN = (() => {
       const report = await post('/api/vpn/diagnostics', {scope});
       reports[scope] = report;
       const labels = {dns:'DNS',tcp:'TCP',tls:'TLS',http:'HTTP (خدمة عنوان الخروج)',interface_up:'الواجهة',route_verified:'المسار',handshake:'VPN Handshake',leak_protection:'حماية التسرب'};
+      const access = {not_tested:'لم يُختبر',browser_challenge:'يتطلب تحققًا تفاعليًا من المتصفح؛ جمع HTML متوقف',access_denied:'رفض الموقع الوصول',rate_limited:'حدّ الطلبات',website_reachable:'الصفحة الرئيسية متاحة؛ صلاحية الاستعلام لم تُختبر',other_http_status:'استجابة أخرى من الموقع',check_failed:'تعذر إكمال فحص الموقع'};
       const target = $('diagnostic-' + scope);
       target.innerHTML = `<h3>${scope === 'host' ? 'الخادم — المسار الحالي':'العامل — Namespace معزول'}</h3><p>${report.healthy ? 'نجحت الفحوص المطلوبة':'فحص غير ناجح أو غير متاح'} · ${esc(time(report.checked_at))}</p><dl class="vpn-kv">${Object.entries(labels).map(([key,label]) => `<div><dt>${label}</dt><dd>${report[key] === true ? 'ناجح':report[key] === false ? 'فشل':'غير منطبق'}</dd></div>`).join('')}<div><dt>عنوان الخروج</dt><dd dir="ltr">${esc(report.egress_ip)}</dd></div><div><dt>الخطأ</dt><dd>${esc(report.error)}</dd></div></dl>`;
       $('diagnostic-export').disabled = false;
+      const source = document.createElement('p');
+      source.textContent = `وصول Shodan: ${access[report.source_access] || 'لم يُختبر'}${report.source_http_status ? ' · HTTP ' + report.source_http_status : ''}. فحص الشبكة مستقل عن صلاحية البحث.`;
+      target.append(source);
       navigate('diagnostics');
     });
   }

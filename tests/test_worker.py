@@ -94,6 +94,23 @@ class WorkerRecoveryTests(unittest.TestCase):
         self.assertTrue(any(event["kind"] == "input_required" for event in events))
         self.assertEqual(self.checkpoint()["state"]["requests_total"], 2)
 
+    def test_html_browser_challenge_pauses_once_preserving_checkpoint(self):
+        from email.message import Message
+        from studio.vpn_config import network_error
+        headers=Message();headers['cf-mitigated']='challenge'
+        headers['Set-Cookie']='DO_NOT_EXPOSE'
+        blocked=engine.http_failure(403,headers)
+        self.assertIn('[BROWSER_CHALLENGE]',str(blocked))
+        self.assertNotIn('DO_NOT_EXPOSE',str(blocked))
+        self.assertFalse(network_error(str(blocked)))
+        self.job['mode']='html'
+        with patch.object(DemoData,'fetch',autospec=True,side_effect=blocked) as fetch:
+            code,events=self.run_capture()
+        self.assertEqual(code,75);self.assertEqual(fetch.call_count,1)
+        self.assertEqual(events[-1]['input_reason'],'source_error')
+        self.assertEqual(self.checkpoint()['state']['requests_total'],1)
+        self.assertEqual(self.checkpoint()['config']['mode'],'html')
+
     def test_api_429_preserves_retry_after_and_resume_sends_no_early_request(self):
         rate_limited = engine.ShodanAPIError("[API_HTTP_429] Fixture rate limit", http_status=429,
                                             retry_after=3600, failure_kind="rate_limit")

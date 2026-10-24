@@ -305,6 +305,52 @@ class WorkerNetworkTests(unittest.TestCase):
 
 
 class ProbeTests(unittest.TestCase):
+    def test_independent_checks_run_concurrently_and_challenge_is_not_tunnel_failure(self):
+        import threading
+        from studio.vpn_probe import probe
+        barrier=threading.Barrier(2,timeout=2)
+        def destination(source_check):
+            barrier.wait()
+            return dict(dns=True,tcp=True,tls=True,source_access='browser_challenge',source_http_status=403)
+        def egress():
+            barrier.wait()
+            return dict(http=True,egress_ip='8.8.8.8')
+        with patch('studio.vpn_probe.destination_probe',side_effect=destination),patch('studio.vpn_probe.egress_probe',side_effect=egress):
+            result=probe(source_check=True)
+        self.assertTrue(result['healthy'])
+        self.assertEqual(result['source_access'],'browser_challenge')
+
+    def test_challenge_diagnostic_checks_headers_without_reading_body_or_retrying(self):
+        from unittest.mock import MagicMock
+        from studio.vpn_probe import destination_probe
+        response=MagicMock();response.__enter__.return_value=response
+        response.status=403;response.getheader.return_value='challenge'
+        addresses=[(2,1,6,'',('8.8.8.8',443))]
+        with patch('studio.vpn_probe.socket.getaddrinfo',return_value=addresses),patch('studio.vpn_probe.socket.socket'),\
+             patch('studio.vpn_probe.ssl.create_default_context'),patch('studio.vpn_probe.http.client.HTTPResponse',return_value=response) as http:
+            result=destination_probe(True)
+            self.assertEqual(result['source_http_status'],403)
+            self.assertEqual(result['source_access'],'browser_challenge')
+            self.assertTrue(result['tls']);response.read.assert_not_called()
+            http.assert_called_once()
+            destination_probe(False)
+            http.assert_called_once()
+
+    def test_destination_resolves_once_and_tries_resolved_addresses_with_tls_hostname(self):
+        from unittest.mock import MagicMock
+        from studio.vpn_probe import destination_probe, TARGET
+        first=MagicMock();first.connect.side_effect=OSError('unreachable')
+        second=MagicMock();second.__enter__.return_value=second
+        context=MagicMock()
+        addresses=[(10,1,6,'',('2606:4700::1111',443,0,0)),(2,1,6,'',('8.8.8.8',443))]
+        with patch('studio.vpn_probe.socket.getaddrinfo',return_value=addresses) as resolve,\
+             patch('studio.vpn_probe.socket.socket',side_effect=[first,second]),\
+             patch('studio.vpn_probe.ssl.create_default_context',return_value=context):
+            result=destination_probe()
+        resolve.assert_called_once()
+        first.close.assert_called_once();second.connect.assert_called_once_with(('8.8.8.8',443))
+        context.wrap_socket.assert_called_once_with(second,server_hostname=TARGET)
+        self.assertTrue(result['tls']);self.assertIn('dns_ms',result)
     def test_egress_is_tested_even_when_destination_tls_fails(self):
         import ssl
         from unittest.mock import MagicMock
@@ -313,13 +359,28 @@ class ProbeTests(unittest.TestCase):
         response.__enter__.return_value=response
         response.status=200;response.read.return_value=b'8.8.8.8'
         opener=MagicMock();opener.open.return_value=response
-        with patch('studio.vpn_probe.socket.getaddrinfo'), patch('studio.vpn_probe.socket.create_connection',return_value=connection), patch('studio.vpn_probe.ssl.create_default_context',side_effect=ssl.SSLError('fixture')), patch('studio.vpn_probe.urllib.request.build_opener',return_value=opener):
+        with patch('studio.vpn_probe.socket.getaddrinfo',return_value=[(2,1,6,'',('8.8.8.8',443))]), patch('studio.vpn_probe.socket.socket',return_value=connection), patch('studio.vpn_probe.ssl.create_default_context',side_effect=ssl.SSLError('fixture')), patch('studio.vpn_probe.urllib.request.build_opener',return_value=opener):
             result=probe()
         self.assertFalse(result['healthy']);self.assertFalse(result['tls'])
         self.assertTrue(result['http']);self.assertEqual(result['egress_ip'],'8.8.8.8')
 
 
 class BrokerSecurityTests(unittest.TestCase):
+    def test_recent_launch_check_reuses_probe_only_with_current_isolation(self):
+        import time
+        broker=object.__new__(Broker);broker.active=P1
+        safe=dict(interface_up=True,route_verified=True,leak_protection=True)
+        broker.last_check={**GOOD,'checked_at':time.time()}
+        with patch.object(broker,'_isolation',return_value=safe),patch.object(broker,'health_check',return_value={'healthy':False}) as probe:
+            self.assertTrue(broker.launch_check()['healthy']);probe.assert_not_called()
+            broker.last_check['checked_at']-=11
+            self.assertFalse(broker.launch_check()['healthy']);probe.assert_called_once()
+        broker.last_check={**GOOD,'checked_at':time.time()}
+        with patch.object(broker,'_isolation',return_value={**safe,'leak_protection':False}),patch.object(broker,'health_check',return_value={'healthy':False}) as probe:
+            self.assertFalse(broker.launch_check()['healthy']);probe.assert_called_once()
+        broker.last_check=None
+        with patch.object(broker,'health_check',return_value={'healthy':False}) as probe:
+            self.assertFalse(broker.launch_check()['healthy']);probe.assert_called_once()
     def test_status_during_monitor_is_responsive_and_never_verified(self):
         import threading,time
         broker=object.__new__(Broker);broker.lock=threading.RLock();broker.profiles={P1:{'enabled':True}}
