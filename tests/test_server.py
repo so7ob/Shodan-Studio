@@ -10,6 +10,7 @@ import time
 import unittest
 from unittest.mock import patch
 
+from studio import __version__
 from studio.server import COOKIE_NAME, MAX_BODY, create_app, main, normalize_host
 from studio.store import Store
 
@@ -326,6 +327,7 @@ class ServerTests(unittest.TestCase):
         status, data, _ = self.client.request("GET", "/health")
         self.assertEqual(status, 200)
         self.assertEqual(set(data), {"ok", "version"})
+        self.assertEqual(data, {"ok": True, "version": __version__})
 
     def test_missing_jobs_and_unsupported_methods(self):
         self.setup_admin()

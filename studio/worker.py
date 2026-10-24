@@ -15,6 +15,7 @@ import urllib.parse
 
 from . import engine
 from .config import settings_from, validate_key
+from .ip_progress import crawler_progress_inputs
 
 
 def atomic_text(path: Path, content: str) -> None:
@@ -142,6 +143,7 @@ class StudioCrawler(engine.Crawler):
         self.input_reason = None
         self._last_snapshot = 0.0
         self._live_seen = None
+        self._reported_ips = set()
         self._finalizing = False
         self._initializing = True
         self._current_query = args.effective_query
@@ -157,7 +159,8 @@ class StudioCrawler(engine.Crawler):
         return super().configure_source(mode, client=self.demo_data if mode == "api" and self.demo_data else client)
 
     def saved_config(self):
-        return {**super().saved_config(), "studio_demo": self.demo_data is not None}
+        return {**super().saved_config(), "studio_demo": self.demo_data is not None,
+                "studio_ip_progress": crawler_progress_inputs(self)}
 
     def check_control(self):
         if self._finalizing or self._initializing:
@@ -227,7 +230,14 @@ class StudioCrawler(engine.Crawler):
             return
         self._last_snapshot = time.monotonic()
         self._sync_live()
-        emit("progress", stats=self.stats())
+        new = self.accepted - self._reported_ips
+        addresses = sorted(str(ip) for ip in new)
+        # Bound IPC messages, including a large restored checkpoint. These
+        # batches are consumed into SQLite, never copied into the event log.
+        for offset in range(0, len(addresses), 1000):
+            emit("ip_batch", ips=addresses[offset:offset + 1000])
+        self._reported_ips.update(new)
+        emit("progress", stats=self.stats(), ip_progress_inputs=crawler_progress_inputs(self))
 
     def progress(self, text):
         self.check_control()
@@ -308,6 +318,7 @@ def run_worker(job_dir: Path, payload: dict) -> int:
         crawler.checkpoint(report["status"])
         crawler._sync_live()
         emit("final", status=state, error=error, stats=crawler.stats(),
+             ip_progress_inputs=crawler_progress_inputs(crawler),
              message="اكتمل تنفيذ الفروع المكتشفة." if state.startswith("completed") else error,
              input_reason=crawler.input_reason)
     return 0 if state.startswith("completed") else 75 if state in ("paused", "waiting_input", "cancelled") else 1

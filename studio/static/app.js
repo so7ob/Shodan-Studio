@@ -69,16 +69,6 @@
     return mode === "api" ? "Shodan API" : mode === "html" ? "Shodan HTML" : mode === "demo" ? "تجريبي محلي" : "تلقائي";
   }
   function jobTitle(job) { return job.title || job.query || "مهمة بحث"; }
-  function jobProgress(job) {
-    const s = getStats(job);
-    const known = s.plan_known === true;
-    const ready = safeNum(s.ready_branches);
-    const completed = safeNum(s.completed_branches);
-    let percent = known && ready > 0 ? completed / ready * 100 : known && finishedStatuses.has(job.status) ? 100 : null;
-    if (known && s.percent !== null && s.percent !== undefined && Number.isFinite(Number(s.percent))) percent = Number(s.percent);
-    if (percent !== null) percent = Math.max(0, Math.min(100, percent));
-    return { known, ready, completed, remaining: s.remaining_branches == null ? Math.max(0, ready - completed) : Math.max(0, safeNum(s.remaining_branches)), percent };
-  }
   function toast(message, type = "success") {
     const node = document.createElement("div");
     node.className = `toast ${type}`;
@@ -197,14 +187,13 @@
     state.tableSignature = signature;
     const focusId = document.activeElement?.closest?.("[data-job]")?.dataset.job;
     $("jobs-body").innerHTML = jobs.map((job) => {
-      const s = getStats(job), p = jobProgress(job);
+      const s = getStats(job);
       const name = jobTitle(job);
-      const phase = p.known ? `${fmt(p.completed)} / ${fmt(p.ready)}` : job.status === "queued" ? "بانتظار البدء" : activeStatuses.has(job.status) ? "جارٍ التخطيط" : "غير محدد";
-      const cls = p.percent === null && activeStatuses.has(job.status) ? "indeterminate" : finishedStatuses.has(job.status) ? "finished" : !activeStatuses.has(job.status) ? "inactive" : "";
-      const percent = p.percent === null ? "—" : `${Math.round(p.percent)}%`;
-      return `<tr data-job="${escapeHTML(job.id)}" class="${job.id === state.selectedId ? "selected" : ""}" tabindex="0" aria-label="${escapeHTML(`تفاصيل ${name}`)}" aria-selected="${job.id === state.selectedId}"><td><span class="job-name">${escapeHTML(name)}</span><code class="job-query">${escapeHTML(job.query || "")}</code>${job.settings?.demo ? '<span class="job-subtitle">بيانات تجريبية محلية</span>' : ""}</td><td>${badge(job.status)}</td><td><div class="table-progress"><div class="table-progress-label"><span>${phase}</span><span class="mono">${percent}</span></div><div class="progress-track ${cls}" data-progress="${p.percent ?? 0}"><span></span></div></div></td><td class="job-number">${fmt(s.unique_ips)}</td><td class="job-number">${fmt(s.requests)}</td><td class="job-date">${escapeHTML(dateText(job.updated_at, true))}</td><td><button class="icon-button" data-open-job="${escapeHTML(job.id)}" aria-label="عرض التفاصيل">${icon("arrow")}</button></td></tr>`;
+      return `<tr data-job="${escapeHTML(job.id)}" class="${job.id === state.selectedId ? "selected" : ""}" tabindex="0" aria-label="${escapeHTML(`تفاصيل ${name}`)}" aria-selected="${job.id === state.selectedId}"><td><span class="job-name">${escapeHTML(name)}</span><code class="job-query">${escapeHTML(job.query || "")}</code>${job.settings?.demo ? '<span class="job-subtitle">بيانات تجريبية محلية</span>' : ""}</td><td>${badge(job.status)}</td><td><div class="job-ip-progress" data-variant="compact"></div></td><td class="job-number">${fmt(s.unique_ips)}</td><td class="job-number">${fmt(s.requests)}</td><td class="job-date">${escapeHTML(dateText(job.updated_at, true))}</td><td><button class="icon-button" data-open-job="${escapeHTML(job.id)}" aria-label="عرض التفاصيل">${icon("arrow")}</button></td></tr>`;
     }).join("");
-    $("jobs-body").querySelectorAll("[data-progress]").forEach((node) => { if (!node.classList.contains("indeterminate")) node.firstElementChild.style.width = `${Number(node.dataset.progress)}%`; });
+    $("jobs-body").querySelectorAll(".job-ip-progress").forEach((node, index) => {
+      ShodanIPProgress.updateFromJob(node, jobs[index]);
+    });
     if (focusId) Array.from($("jobs-body").querySelectorAll("[data-job]")).find((node) => node.dataset.job === focusId)?.focus({ preventScroll: true });
   }
   function setView(view) {
@@ -266,7 +255,7 @@
     return `<button class="button small ${css}" data-action="${action}"${disabled ? " disabled" : ""}>${icon(iconName)}${label}</button>`;
   }
   function renderDetail(job) {
-    const s = getStats(job), p = jobProgress(job);
+    const s = getStats(job);
     text("detail-title", jobTitle(job)); text("detail-query", job.query || "");
     $("detail-status").innerHTML = badge(job.status);
     text("results-tab-count", fmt(s.unique_ips));
@@ -274,16 +263,10 @@
       ? PHASE[job.status] || STATUS[job.status]?.[0] || "بانتظار البدء"
       : PHASE[s.phase] || (s.phase ? String(s.phase) : PHASE[job.status] || STATUS[job.status]?.[0] || "بانتظار البدء");
     text("detail-phase", phase);
-    text("detail-percent", p.percent === null ? "—" : `${Math.round(p.percent)}%`);
-    const track = $("detail-progress");
-    track.className = `progress-track large${p.percent === null && activeStatuses.has(job.status) ? " indeterminate" : ""}${finishedStatuses.has(job.status) ? " finished" : ""}`;
-    track.firstElementChild.style.width = p.percent === null && activeStatuses.has(job.status) ? "35%" : `${p.percent || 0}%`;
-    track.setAttribute("role", "progressbar"); track.setAttribute("aria-label", "تقدم استخراج الفروع المكتشفة");
-    if (p.percent === null) { track.removeAttribute("aria-valuenow"); track.setAttribute("aria-valuetext", "لم يتحدد عدد الفروع بعد"); }
-    else { track.setAttribute("aria-valuenow", String(Math.round(p.percent))); track.setAttribute("aria-valuetext", `${fmt(p.completed)} من ${fmt(p.ready)} فرع`); }
-    text("progress-description", p.known ? `${fmt(p.completed)} فرع مكتمل من ${fmt(p.ready)} فرع معروف` : "يتحدد إجمالي الفروع بعد اكتمال مرحلة التخطيط.");
+    ShodanIPProgress.updateFromJob($("detail-ip-progress"), job);
     text("detail-current-query", s.current_query || job.query || "—");
-    text("stat-completed", p.known ? fmt(p.completed) : "—"); text("stat-remaining", p.known ? fmt(p.remaining) : "—");
+    text("stat-completed", s.plan_known ? `${fmt(s.completed_branches)} / ${fmt(s.ready_branches)}` : "—");
+    text("stat-remaining", s.plan_known ? fmt(s.remaining_branches) : "—");
     text("stat-ips", fmt(s.unique_ips)); text("stat-requests", `${fmt(s.requests_this_run ?? s.requests)} / ${fmt(s.request_budget ?? job.settings?.max_requests ?? 500)}`);
     text("detail-total-requests", fmt(s.requests));
     text("detail-source", sourceText(s.source || job.mode)); text("detail-started", dateText(job.started_at));

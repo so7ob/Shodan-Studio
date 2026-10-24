@@ -1,0 +1,147 @@
+# مؤشر IP في Shodan Studio 1.1.0
+
+التغيير مبني على `ShodanStudio-IP-Progress-Integration-Kit-v1.zip` المقدمة، بعد
+تكييف ملفات Python وJavaScript وCSS مع التطبيق الأصلي. لا تتغير استعلامات البحث
+أو المحرك `studio/engine.py` أو سياسة HTML/API أو طلبات Shodan. لم يُنشر هذا
+الإصدار على خدمة المستخدم الأصلية. الاختبار التشغيلي استخدم خدمة مستقلة وبيانات
+اصطناعية على Debian 12 نفسه؛ التفاصيل في `VALIDATION.md`.
+
+## البيانات والحساب
+
+- المخزن الحالي هو `studio.sqlite3`، وجدول `jobs` يحتوي مستند JSON، وحقل العدد
+  القديم هو `stats.unique_ips`. كانت عناوين النتائج في الملفات وcheckpoint.
+- أضيف جدول `job_ips(job_id, ip)` بمفتاح أساسي مركب؛ تُطبّع IPv4/IPv6 وتُحفظ
+  بـ`INSERT OR IGNORE`. العدد في `stats.unique_ips` ناتج فعلي عن هذا الجدول،
+  محفوظ مع مدخلات التقدير في معاملة واحدة. لا يُجمع عدد IP من الفروع.
+- النتيجة الجديدة هي `job.ip_progress` في `GET /api/jobs` و`GET /api/jobs/{id}`
+  وأحداث `progress` و`final`. التحديث القائم يستطلع API كل ثانيتين. الحقول القديمة،
+  ومنها نسبة الفروع `stats.percent`، باقية للتوافق؛ الواجهة الرئيسية لا تقرؤها.
+- `expected_records` يأتي من `report.plan.extraction_order`، بعد إزالة الاستعلامات
+  المكررة والعقد الأب التي لها أوراق أبناء. لا تدخل عقد التخطيط أو probes في المجموع.
+- فروع الدولة/المدينة/ASN/port المتباينة يمكن جمع سجلات خدماتها؛ لا يعني ذلك أن
+  عناوين IP غير متكررة بينها. التفرعات المختلطة أو فروع البحث النصي الشقيقة عبر
+  `product/version/org/os` لا يُفترض أنها غير متداخلة: يظهر إجمالي مجهول. وجود
+  `product` أو `version` داخل نطاق واحد لا يمنع تقدير ذلك الفرع وحده.
+- الفروع المكتملة لا تضيف متبقيًا. الفرع غير المكتمل ذو العدد المجهول يجعل النسبة
+  غير محددة. في استراتيجية `tree` لا توجد خطة نهائية مسبقة، فيظل المقام مجهولًا
+  إلى نجاح الاجتياز؛ لم يتغير أسلوب تلك الاستراتيجية.
+- المتبقي هو سجلات الخدمات المتبقية × نسبة تحويل تقديرية. هذا الدمج يحتفظ بالافتراض
+  المحافظ للحزمة، عنوان جديد واحد لكل سجل متبقٍ؛ لا تتوفر في caches المكتملة
+  هويات كافية لحساب نسبة إزالة تكرار عالمية موثوقة، لذا `observed_processed_records=null`.
+  قد يبالغ التقدير في المتبقي عند تعدد الخدمات للعنوان نفسه، ولا يمثل حدًا مضمونًا
+  لجميع بيانات Shodan أو IP المطابق بعد الفلترة.
+- يُستخدم `processed_records` للصفحات الجزئية في API فقط عندما تكون أعدادها
+  محفوظة في `api_progress`، ولكل سجل هوية banner فريدة وIP صالح، والصفحات كاملة
+  الحجم المتوقع، ولا توجد تحذيرات API لذلك النطاق. الصفحات القصيرة أو المكررة أو
+  تغيّر الإجمالي أو غياب الهويات تُبقي هذا العد مجهولًا. لا تدخل محاولات HTTP فيه.
+- المثال الاختباري: 512 عنوانًا محفوظًا + 270 عنوانًا متبقيًا تقديريًا = 782، أي 65%.
+  لا يوجد ثابت 270 في كود التطبيق. 16/77 معلومة ثانوية لا تتحكم بالشريط.
+- أعلى نسبة قبل نجاح المهمة 99%. لا تظهر 100% إلا مع `completed` أو
+  `completed_warnings` واجتياز مكتمل وكل الأوراق مكتملة. النص هو «اكتملت الفروع
+  المخططة»، وتحذيرات التغطية منفصلة. النجاح مع 0 IP يعرض 100% من العمل المخطط.
+
+## الحفظ والاستعادة
+
+يمر العامل بالكاتب الذري الأصلي للـcheckpoint ويضيف امتدادًا عدديًا
+`config.studio_ip_progress`. تبقى صيغة ShodanSpider schema 1 متوافقة. تُرسل
+دفعات IP صغيرة إلى المدير لإدراجها في SQLite؛ لا تُخزّن هذه الدفعات في سجل الأحداث.
+النتائج وتنزيل TXT/CSV/JSON تقرأ مجموعة SQLite نفسها، مع ترتيب العناوين السابق.
+تُضغط مدخلات الخطط الكبيرة إلى مجموعات عددية محدودة مع حفظ عدد الأوراق الفعلي؛
+لا يتغير ترتيب الاستخراج ولا حد عدد العقد المسموح.
+
+عند بدء الخادم، وبعد الحصول على قفل المدير وقبل تشغيل الطابور، تُطابق ملفات النتائج
+والـcheckpoint مع الجدول. هذا يعالج انقطاع العامل قبل وصول IPC ويعيد مزامنة بيانات
+قد كتبها إصدار قديم بعد rollback. لا تُحذف عناوين أو ملفات تشغيل. لا تغيّر المطابقة
+وقت آخر تحديث المهمة. يلزم وقت قراءة محلي بحسب حجم الملفات عند الإقلاع؛ الاستطلاع
+العادي لا يعيد قراءة الملفات أو عد الجدول لكل مهمة ولا يرسل طلب Shodan.
+
+المهام القديمة التي لا تحتوي خطة قابلة للاستعادة تعرض العدد المستخرج والإجمالي
+المجهول. تقرير قديم يُستخدم فقط عندما يطابق حالته checkpoint؛ لا تُختلق خطة
+من عدادات الفروع. إعادة استكمال المهمة بالطريقة المعتادة قد تبني الخطة من cache.
+
+## الملفات
+
+| الملف | التغيير |
+|---|---|
+| `studio/ip_progress.py` | الوحدة المرفقة + تكييف الأوراق والحالات والصفحات |
+| `studio/store.py` | جدول IP الفريد ومعاملة حفظ العدد |
+| `studio/worker.py` | مدخلات التقدير ودفعات IP وامتداد checkpoint |
+| `studio/jobs.py` | استعادة البيانات وAPI والأحداث والنتائج |
+| `studio/server.py` | إتاحة ملفات المكوّن الثابتة |
+| `studio/static/ip_progress.js`, `ip_progress.css` | المكوّن المرفق المكيّف مع RTL والثيم |
+| `studio/static/app.js`, `index.html`, `app.css` | ربط القائمة والتفاصيل واحتواء الجدول على الهاتف |
+| `studio/__init__.py` | رقم إصدار التطبيق 1.1.0 |
+| `install-debian.sh` | فحص المكوّن الجديد وتضمين وثائق الترقية |
+| `tests/test_ip_progress.py`, `test_ip_progress.mjs` | اختبارات الحزمة وتحصين عرض النسبة |
+| `tests/test_ip_progress_integration.py` | SQLite/worker/checkpoint/API/restart/duplicates |
+| `tests/browser_ip_progress.cjs` | تحقق المتصفح الفعلي |
+| `tools/verify_ip_progress_service.py` | اختبار خدمة Debian معزولة قابل للإعادة |
+| `tools/build_release.py` | حزمة المصدر والبصمات |
+| `.gitignore`, `DESIGN.md`, `README.md`, `README_AR.md`, `ARCHITECTURE.md`, `VALIDATION.md`, `SHA256SUMS`, `docs/` | وثائق وأدلة الاختبار والبصمات |
+
+## النسخ الاحتياطي والترقية
+
+الأوامر التالية لخادم التثبيت الأصلي ذي المسارات الموثقة. راجع مساراتك إذا خصصتها.
+لا تستخدم حزمة `Shodan-Studio-Debian12.zip` القديمة الموجودة في المستودع؛ الحزمة
+الجديدة هي `Shodan-Studio-1.1.0-Debian12.zip`.
+
+1. علّق المهام المنتظرة من الواجهة إن كنت لا تريد استئناف طابورها عند بدء الخدمة.
+   مهام API تحتاج المفتاح مجددًا بعد إعادة تشغيل الخادم.
+2. من جلسة root، احتفظ بنسخة كاملة ومتسقة قبل تبديل الكود:
+
+```bash
+sudo -i
+set -e
+umask 077
+STUDIO_BACKUP="/root/shodan-studio-backups/ip-progress-$(date +%Y%m%d-%H%M%S)"
+mkdir -p "$STUDIO_BACKUP"
+systemctl stop shodan-studio
+readlink -f /opt/shodan-studio/current > "$STUDIO_BACKUP/previous-release.txt"
+tar -C / -czf "$STUDIO_BACKUP/before-upgrade.tar.gz" \
+  opt/shodan-studio var/lib/shodan-studio \
+  etc/default/shodan-studio etc/systemd/system/shodan-studio.service
+tar -tzf "$STUDIO_BACKUP/before-upgrade.tar.gz" > /dev/null
+```
+
+3. فك الحزمة الجديدة في مجلد منفصل، ثم افحصها وثبتها مع إبقاء الإعدادات الحالية:
+
+```bash
+unzip Shodan-Studio-1.1.0-Debian12.zip -d ip-progress-upgrade
+cd ip-progress-upgrade/shodan-studio
+sha256sum -c SHA256SUMS
+bash install-debian.sh --check
+bash install-debian.sh --no-start
+systemctl start shodan-studio
+systemctl is-active shodan-studio
+journalctl -u shodan-studio -n 40 --no-pager
+```
+
+إضافة الجدول تلقائية وغير هادمة؛ لا يلزم حذف قاعدة البيانات أو تشغيل migrate منفصل.
+افتح عنوان المتصفح المعتاد، وسجّل الدخول وتحقق من القائمة والتفاصيل وعدد النتائج.
+أوقف واستكمل مهمة مناسبة بإذن المشغّل المعتاد، ثم تحقق من حفظ الأعداد بعد
+`systemctl restart shodan-studio`. إعادة تشغيل مهمة حقيقية قد ترسل طلباتها المعتادة؛
+المؤشر نفسه لا يرسل طلبات.
+
+## الرجوع إلى الكود السابق مع حفظ البيانات الحالية
+
+لا تحتاج إزالة جدول `job_ips` أو استعادة نسخة بيانات قديمة للرجوع؛ الإصدار السابق
+يتجاهل الجدول والإضافة العددية في checkpoint. احتفظ أيضًا بنسخة لحالة ما بعد
+الترقية قبل الرجوع، كي لا تفقد نتائج ظهرت بعد النسخة الأولى.
+
+```bash
+systemctl stop shodan-studio
+tar -C /var/lib -czf "$STUDIO_BACKUP/data-before-rollback.tar.gz" shodan-studio
+STUDIO_PREVIOUS="$(cat "$STUDIO_BACKUP/previous-release.txt")"
+test -d "$STUDIO_PREVIOUS/studio"
+STUDIO_SWITCH="$(mktemp -d /opt/shodan-studio/.rollback-XXXXXXXX)"
+ln -s "$STUDIO_PREVIOUS" "$STUDIO_SWITCH/current"
+mv -Tf "$STUDIO_SWITCH/current" /opt/shodan-studio/current
+rmdir "$STUDIO_SWITCH"
+systemctl restart shodan-studio
+systemctl is-active shodan-studio
+```
+
+إذا بدأت جلسة جديدة فاضبط `STUDIO_BACKUP` إلى المسار الذي سجلته. ملف الخدمة وإعدادات
+الاتصال لم تتغير في هذا التعديل. استعادة قاعدة بيانات قديمة خطوة منفصلة تفقد
+التغييرات الأحدث؛ لا تستخرج الأرشيف فوق بيانات نشطة. استعده إلى مجلد منفصل وافحصه
+أولًا، واحتفظ بالمجلد الحالي قبل أي استبدال.

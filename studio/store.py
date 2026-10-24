@@ -5,6 +5,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 import hashlib
 import hmac
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -58,6 +59,11 @@ class Store:
                     document TEXT NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS jobs_queue ON jobs(status,priority DESC,created_at);
+                CREATE TABLE IF NOT EXISTS job_ips (
+                    job_id TEXT NOT NULL, ip TEXT NOT NULL,
+                    PRIMARY KEY(job_id,ip),
+                    FOREIGN KEY(job_id) REFERENCES jobs(id) ON DELETE CASCADE
+                ) WITHOUT ROWID;
                 CREATE TABLE IF NOT EXISTS events (
                     id INTEGER PRIMARY KEY AUTOINCREMENT, job_id TEXT NOT NULL,
                     at TEXT NOT NULL, document TEXT NOT NULL,
@@ -251,6 +257,33 @@ class Store:
                 return job
             con.commit()
         return None
+
+    def record_ip_progress(self, job_id: str, ips=(), inputs=None, **changes) -> dict:
+        """Commit deduplicated IPs, cached COUNT and metric inputs together.
+
+        The composite primary key handles replay/resume. Dashboard polls read
+        the cached exact count in the job document, not a table scan per job.
+        """
+        addresses = {str(ipaddress.ip_address(ip)) for ip in ips}
+        with self.connection() as con:
+            con.execute("BEGIN IMMEDIATE")
+            row = con.execute("SELECT document FROM jobs WHERE id=?", (job_id,)).fetchone()
+            if row is None:
+                raise KeyError(job_id)
+            job = json.loads(row[0])
+            con.executemany("INSERT OR IGNORE INTO job_ips(job_id,ip) VALUES(?,?)",
+                            ((job_id, ip) for ip in addresses))
+            job.update(changes)
+            if inputs is not None:
+                job["_ip_progress_inputs"] = inputs
+            count = con.execute("SELECT COUNT(*) FROM job_ips WHERE job_id=?", (job_id,)).fetchone()[0]
+            job["stats"] = {**job.get("stats", {}), "unique_ips": count}
+            job["_ip_progress_stored"] = True
+            job["updated_at"] = changes.get("updated_at", utc_now())
+            con.execute("UPDATE jobs SET status=?,updated_at=?,document=? WHERE id=?",
+                        (job["status"], job["updated_at"], _json(job), job_id))
+            con.commit()
+        return job
 
     def recover_interrupted(self) -> int:
         changed = 0

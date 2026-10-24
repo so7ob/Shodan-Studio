@@ -23,6 +23,7 @@ from . import engine
 from .config import JobValidationError, settings_from, validate_job, validate_key, text
 from .store import Store, utc_now
 from .worker import atomic_text
+from .ip_progress import crawler_progress_inputs, progress_from_job
 
 
 FINAL = {"completed", "completed_warnings", "cancelled", "failed"}
@@ -69,6 +70,7 @@ class JobManager:
                 self._ownership = None
                 raise ValueError("توجد خدمة أخرى تستخدم مجلد البيانات نفسه.") from None
             self.store.recover_interrupted()
+            self._restore_ip_progress()
             self._stop.clear()
             self._thread = threading.Thread(target=self._loop, name="studio-queue", daemon=True)
             self._thread.start()
@@ -112,12 +114,61 @@ class JobManager:
 
     def _public(self, job):
         result = dict(job)
+        result["ip_progress"] = progress_from_job(job)
+        result.pop("_ip_progress_inputs", None)
+        result.pop("_ip_progress_stored", None)
         with self._lock:
             result["has_key"] = result["id"] in self._keys
         path = self._path(result["id"])
         result["has_checkpoint"] = (path / "checkpoint.json").is_file()
-        result["has_results"] = (path / "live-ips.txt").is_file() or (path / "result.txt").is_file()
+        result["has_results"] = bool(result.get("stats", {}).get("unique_ips")) or (path / "live-ips.txt").is_file() or (path / "result.txt").is_file()
         return self._redact(result)
+
+    def _restore_ip_progress(self):
+        """One-time legacy backfill and crash reconciliation, entirely offline.
+
+        Reconcile after acquiring manager ownership, before starting the queue.
+        An unreadable checkpoint leaves the estimate unknown, never invented.
+        """
+        with self.store.connection() as con:
+            jobs = [json.loads(row[0]) for row in con.execute("SELECT document FROM jobs")]
+        for job in jobs:
+            # Also reconcile finished jobs: an older release may have written
+            # their files during a rollback, leaving the additive SQLite table
+            # behind. Startup is offline; normal dashboard polls do no scanning.
+            self._restore_job_progress(job)
+
+    def _restore_job_progress(self, job):
+        path = self._path(job["id"])
+        try:
+            ips = set(self._ips(job["id"]))
+        except (JobValidationError, OSError):
+            ips = set()
+        inputs = job.get("_ip_progress_inputs")
+        if (path / "checkpoint.json").is_file():
+            try:
+                from .worker import build_args
+                crawler = engine.Crawler(build_args(path, {**job, "mode": "html"}, None))
+                ips.update(str(ip) for ip in crawler.accepted)
+                saved = crawler.args.resume_payload["config"].get("studio_ip_progress")
+                if isinstance(saved, dict):
+                    # Store only the recognized, numeric estimator input fields.
+                    from .ip_progress import validate_progress_inputs
+                    inputs = validate_progress_inputs(saved)
+                else:
+                    inputs = None
+                    report_path = path / "result.txt.report.json"
+                    if report_path.is_file() and not report_path.is_symlink() and report_path.stat().st_size <= 64 * 1024 * 1024:
+                        report = json.loads(report_path.read_text(encoding="utf-8"))
+                        if report.get("status") == crawler.args.resume_payload["state"].get("status"):
+                            crawler.report = report
+                            inputs = crawler_progress_inputs(crawler)
+            except (ValueError, TypeError, KeyError, AttributeError, OSError,
+                    engine.SpiderError, engine.CheckpointError, SystemExit):
+                inputs = None
+        self.store.record_ip_progress(job["id"], ips, inputs or {
+            "branches": [], "planning_complete": False, "traversal_completed": False},
+            updated_at=job["updated_at"])
 
     def list_jobs(self):
         jobs = [self._public(j) for j in self.store.list_jobs()]
@@ -147,6 +198,7 @@ class JobManager:
                    "request_budget": fields["settings"]["max_requests"], "plan_known": False,
                    "completed_branches": 0, "ready_branches": None, "remaining_branches": None,
                    "percent": None, "source": fields["mode"], "warnings": 0, "demo": fields["settings"]["demo"]},
+               "_ip_progress_stored": True,
                "error": "أدخل مفتاح API لاستكمال المهمة." if missing else None,
                "created_at": utc_now(), "started_at": None, "finished_at": None, "attempts": 0}
         try:
@@ -297,6 +349,9 @@ class JobManager:
                     continue
                 event = self._redact(event)
                 kind = event.get("kind")
+                if kind == "ip_batch":
+                    self.store.record_ip_progress(job_id, event.get("ips", []))
+                    continue
                 with self._lock:
                     current = self._get(job_id)
                     changes = {}
@@ -317,13 +372,17 @@ class JobManager:
                         changes.update(status=state, error=event.get("error"), input_reason=event.get("input_reason"),
                                        finished_at=utc_now() if state in FINAL else None)
                     if changes:
-                        self.store.update_job(job_id, **changes)
+                        updated = self.store.record_ip_progress(job_id,
+                            inputs=event.pop("ip_progress_inputs", None), **changes)
+                        event["stats"] = updated["stats"]
+                        event["ip_progress"] = progress_from_job(updated)
                 self.store.append_event(job_id, event)
             process.wait()
             if final is None:
                 current = self._get(job_id)
                 state = "cancelled" if current["status"] == "cancel_requested" else "interrupted"
                 self.store.update_job(job_id, status=state, error="توقف عامل التنفيذ قبل اكتماله. آخر نقطة استكمال ونتائج محفوظة متاحة.", finished_at=utc_now() if state == "cancelled" else None)
+                self._restore_job_progress(self._get(job_id))
                 self.store.append_event(job_id, {"kind": "state", "status": state, "level": "warning", "message": "توقف عامل التنفيذ؛ يمكن استكمال آخر حالة محفوظة."})
         finally:
             if process.poll() is None:
@@ -379,9 +438,18 @@ class JobManager:
         offset, limit = max(0, int(offset)), min(1000, max(1, int(limit)))
         if not isinstance(q, str) or len(q) > 128:
             raise JobValidationError("بحث النتائج غير صالح.")
-        ips = self._ips(job_id)
+        ips = self._result_ips(job_id)
         selected = [ip for ip in ips if q.casefold() in ip.casefold()] if q else ips
         return {"items": selected[offset:offset+limit], "total": len(selected), "all_total": len(ips), "offset": offset, "limit": limit}
+
+    def _result_ips(self, job_id):
+        job = self._get(job_id)
+        if not job.get("_ip_progress_stored"):
+            return self._ips(job_id)
+        with self.store.connection() as con:
+            values = [ipaddress.ip_address(row[0]) for row in con.execute(
+                "SELECT ip FROM job_ips WHERE job_id=?", (job_id,))]
+        return [str(ip) for ip in sorted(values, key=lambda ip: (ip.version, int(ip)))]
 
     def download(self, job_id, format_name):
         job = self.get_job(job_id)
@@ -393,7 +461,7 @@ class JobManager:
             if path.stat().st_size > 64 * 1024 * 1024:
                 raise JobValidationError("الملف أكبر من الحد المسموح للتنزيل.")
             return path.read_bytes(), "application/json; charset=utf-8", name + "." + format_name + ".json"
-        ips = self._ips(job_id)
+        ips = self._result_ips(job_id)
         if format_name == "txt":
             return ("".join(ip + "\n" for ip in ips)).encode(), "text/plain; charset=utf-8", name + ".txt"
         if format_name == "csv":
@@ -462,6 +530,7 @@ class JobManager:
                 missing = mode == "api" and not key and not settings["demo"]
                 self.store.update_job(job["id"], status="waiting_input" if missing else "paused", stats=stats,
                                       error="أدخل مفتاح API للاستكمال." if missing else None, imported=True)
+                self._restore_job_progress(self._get(job["id"]))
                 self.store.append_event(job["id"], {"kind": "log", "level": "info", "message": "استُوردت نقطة الاستكمال؛ راجع المصدر ثم اختر استكمال."})
                 return self.get_job(job["id"])
             except (Exception, SystemExit):
