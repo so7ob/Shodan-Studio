@@ -122,6 +122,7 @@ class WorkerRecoveryTests(unittest.TestCase):
                 self.assertEqual(events[-1]["status"], "waiting_input")
                 self.assertEqual(events[-1]["input_reason"], "rate_limit")
                 self.assertEqual(events[-1]["stats"]["requests"], 1)
+                self.assertFalse(events[-1]["stats"]["wait_unbounded"])
                 saved = self.checkpoint()
                 deadline = saved["state"]["not_before_utc"]
                 self.assertGreaterEqual(deadline, started + 3599)
@@ -139,6 +140,34 @@ class WorkerRecoveryTests(unittest.TestCase):
                 self.assertEqual(self.checkpoint()["state"]["not_before_utc"], deadline)
         self.assertEqual(api_request.call_count, 1)
         html_request.assert_not_called()
+
+    def test_unbounded_rate_limit_remains_visible_across_repeated_resume(self):
+        blocked = engine.ShodanAPIError("[API_HTTP_429] Fixture rate limit", http_status=429,
+                                        retry_after=float("inf"), failure_kind="rate_limit")
+        with patch.object(DemoData, "request", autospec=True, side_effect=blocked) as request:
+            with patch.object(DemoData, "fetch", side_effect=AssertionError("No source switching on 429")):
+                for attempt in range(3):
+                    code, events = self.run_capture()
+                    final = events[-1]
+                    self.assertEqual(code, 75)
+                    self.assertEqual(final["status"], "waiting_input")
+                    self.assertEqual(final["input_reason"], "rate_limit")
+                    self.assertEqual(final["stats"]["phase"], "waiting")
+                    self.assertTrue(final["stats"]["wait_unbounded"])
+                    self.assertIsNone(final["stats"]["wait_until"])
+                    self.assertEqual(final["stats"]["requests_this_run"], 1 if attempt == 0 else 0)
+                    self.assertTrue(self.checkpoint()["state"]["wait_unbounded"])
+                    self.assertEqual(self.checkpoint()["state"]["requests_total"], 1)
+                    prompts = [event for event in events if event["kind"] == "input_required"]
+                    self.assertEqual(prompts[-1]["detail"], {"reason": "rate_limit", "choices": ["cancel"]})
+                for action, status in (("pause", "paused"), ("cancel", "cancelled")):
+                    (self.job_dir / "control.json").write_text(json.dumps({"action": action}))
+                    code, events = self.run_capture()
+                    self.assertEqual(code, 75)
+                    self.assertEqual(events[-1]["status"], status)
+                    self.assertEqual(events[-1]["stats"]["requests_this_run"], 0)
+                    self.assertTrue(self.checkpoint()["state"]["wait_unbounded"])
+        self.assertEqual(request.call_count, 1)
 
 
 if __name__ == "__main__":

@@ -223,7 +223,7 @@ class StudioCrawler(engine.Crawler):
         done = int(plan.get("completed_leaves", 0)) if known else 0
         total = len(branches) if known else None
         phase = self.report.get("planning_stage", "discovering")
-        if self.not_before_utc and self.not_before_utc > time.time():
+        if self.wait_unbounded or (self.not_before_utc and self.not_before_utc > time.time()):
             phase = "waiting"
         return {
             "phase": phase, "unique_ips": len(self.accepted), "filtered_ips": len(self.candidates)-len(self.accepted),
@@ -234,6 +234,7 @@ class StudioCrawler(engine.Crawler):
             "plan_known": known, "percent": round(100*done/total, 1) if total else (100 if known and self.report.get("traversal_completed") else None),
             "current_query": self._current_query, "source": self.args.mode,
             "warnings": len(self.report["warnings"]), "wait_until": self.not_before_utc,
+            "wait_unbounded": self.wait_unbounded,
             "cache_hits": self.report.get("cache_hits", 0), "visited": self.report.get("visited", {}),
             "session_number": self.session_number, "demo": self.demo_data is not None,
             "planning_strategy": self.args.strategy, "facet_probes": plan.get("facet_probes", 0) if known else 0,
@@ -352,7 +353,15 @@ def _run_worker_locked(job_dir: Path, payload: dict) -> int:
                 raise
     except (engine.SpiderError, engine.ShodanAPIError, OSError, KeyboardInterrupt) as exc:
         error = engine.safe_detail(exc)
-        paused = isinstance(exc, (engine.PauseRequested, KeyboardInterrupt))
+        # An unrepresentable Retry-After is a persistent source hold, not a
+        # failed extraction or a user pause. Restoring it must retain the same
+        # reason without inventing a deadline or permitting an early request.
+        rate_limit_hold = crawler.wait_unbounded and not crawler.stop_reason
+        if rate_limit_hold:
+            crawler.input_reason = "rate_limit"
+            emit("input_required", level="warning", message=error,
+                 detail={"reason": "rate_limit", "choices": ["cancel"]})
+        paused = rate_limit_hold or isinstance(exc, (engine.PauseRequested, KeyboardInterrupt))
         state = "cancelled" if crawler.stop_reason == "cancel" else "waiting_input" if crawler.input_reason else "paused" if paused else "failed"
         report = crawler.finish("paused" if paused else "failed", error)
         report["partial_saved"] = True
