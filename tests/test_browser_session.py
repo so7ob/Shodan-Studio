@@ -52,16 +52,61 @@ class BoundaryTests(unittest.TestCase):
     def test_challenge_is_not_solved_or_rotated(self):
         s=self.session();s.document={'url':URL,'status':403,'challenge':True};s.html=lambda:{'url':URL,'html':'<html>challenge</html>'}
         s.navigate=MagicMock()
-        with self.assertRaisesRegex(RuntimeError,'BROWSER_CHALLENGE'):s.fetch(URL)
+        for _ in range(3):
+            with self.assertRaisesRegex(RuntimeError,'BROWSER_CHALLENGE'):s.fetch(URL)
+        s.navigate.assert_not_called()
         s.call.assert_not_called()
     def test_rate_limit_preserves_numeric_or_unbounded_wait_without_raw_headers(self):
         for header,expected in [('3600',3600),('9'*400,'unbounded')]:
             s=self.session();s.html=lambda:{'url':URL,'html':'rate limited'};s.navigate=MagicMock()
             s.event({'method':'Network.responseReceived','sessionId':'session','params':{'type':'Document','frameId':'main','response':{'url':URL,'status':429,'headers':{'Retry-After':header,'Set-Cookie':'private-cookie'}}}})
-            result=s.fetch(URL)
-            self.assertEqual(result,{'http_status':429,'retry_after':expected})
+            for _ in range(3):
+                result=s.fetch(URL)
+                self.assertEqual(result,{'http_status':429,'retry_after':expected})
+            s.navigate.assert_not_called()
             self.assertEqual(s.status()['state'],'rate_limited')
             self.assertNotIn('private-cookie',json.dumps(result))
+    def test_fetch_never_navigates_away_from_a_denied_document(self):
+        for current in (URL, build_url('fixture','org'), 'https://account.shodan.io/'):
+            for status in (401,403,429):
+                with self.subTest(current=current,status=status):
+                    s=self.session()
+                    saved={'url':current,'status':status,'retry_after':3600}
+                    s.document=dict(saved)
+                    s.html=MagicMock(return_value={'url':current,'html':'denied'})
+                    for _ in range(3):
+                        if status==429:
+                            self.assertEqual(s.fetch(URL),{'http_status':429,'retry_after':3600})
+                        else:
+                            with self.assertRaisesRegex(RuntimeError,'HTTP_'+str(status)):s.fetch(URL)
+                        self.assertEqual(s.document,saved)
+                    s.call.assert_not_called()  # Includes the real Page.navigate boundary.
+                    s.html.assert_not_called()
+    def test_denial_arriving_during_verification_blocks_navigation(self):
+        s=self.session();s.document={'url':URL,'status':200}
+        def verify():
+            s.document={'url':URL,'status':429,'retry_after':60}
+            return {'state':'rate_limited'}
+        s.verify=verify
+        self.assertEqual(s.fetch(URL),{'http_status':429,'retry_after':60})
+        s.call.assert_not_called()
+    def test_new_successful_document_can_clear_prior_denial(self):
+        s=self.session();s.document={'url':URL,'status':403,'challenge':True}
+        with self.assertRaisesRegex(RuntimeError,'BROWSER_CHALLENGE'):s.fetch(URL)
+        s.event({'method':'Network.responseReceived','sessionId':'session','params':{'type':'Document','frameId':'main','response':{'url':URL,'status':200,'headers':{}}}})
+        body=DemoData('fixture').fetch(URL);s.html=lambda:{'url':URL,'html':body}
+        self.assertEqual(s.fetch(URL),{'html':body})
+        s.call.assert_not_called()
+    def test_successful_document_allows_next_facet_navigation(self):
+        s=self.session();s.document={'url':URL,'status':200}
+        target=build_url('fixture','org');body=DemoData('fixture').fetch(target)
+        def navigate(method,params):
+            self.assertEqual(method,'Page.navigate');self.assertEqual(params,{'url':target})
+            s.document={'url':target,'status':200}
+            return {}
+        s.call.side_effect=navigate;s.html=lambda:{'url':target,'html':body}
+        self.assertEqual(s.fetch(target),{'html':body})
+        s.call.assert_called_once_with('Page.navigate',{'url':target})
     def test_repeated_verification_only_reads_page_without_reloading_challenge(self):
         s=self.session();s.document={'url':URL,'status':403,'challenge':True}
         s.call.return_value={'result':{'value':json.dumps({'url':URL,'html':'<html>Challenge</html>'})}}

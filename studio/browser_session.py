@@ -213,16 +213,28 @@ class Session:
         from .engine import http_failure
         from email.message import Message
         facet_url(url)
-        if not same_facet(self.expected,url) or self.verify()['state']!='ready':self.navigate(url)
-        deadline=time.monotonic()+25
-        while time.monotonic()<deadline:
+        def source_failure():
+            # Check the current main document before navigation can erase it.
+            # A different facet/login URL does not authorize retrying a denial.
             doc=self.document
-            if same_facet(doc.get('url'),url) and doc.get('status',0)>=400:
-                if doc['status']==429:
+            if doc.get('status',0)>=400 or doc.get('challenge'):
+                if doc.get('status')==429:
                     return {'http_status':429,'retry_after':doc.get('retry_after')}
                 headers=Message()
                 if doc.get('challenge'):headers['cf-mitigated']='challenge'
-                raise RuntimeError(str(http_failure(doc['status'],headers)))
+                raise RuntimeError(str(http_failure(403 if doc.get('challenge') else doc['status'],headers)))
+            return None
+        failure=source_failure()
+        if failure is not None:return failure
+        if not same_facet(self.expected,url) or self.verify()['state']!='ready':
+            # Verification reads the DOM while response events can arrive.
+            failure=source_failure()
+            if failure is not None:return failure
+            self.navigate(url)
+        deadline=time.monotonic()+25
+        while time.monotonic()<deadline:
+            failure=source_failure()
+            if failure is not None:return failure
             if self.verify()['state']=='ready':return {'html':self.html()['html']}
             time.sleep(.25)
         raise RuntimeError('[BROWSER_INPUT] افتح جلسة المتصفح وأكمل التحقق أو تسجيل الدخول يدويًا؛ لم تُستخرج نتائج غير متحققة.')
