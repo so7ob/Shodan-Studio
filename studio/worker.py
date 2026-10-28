@@ -305,6 +305,14 @@ class StudioCrawler(engine.Crawler):
 
 def run_worker(job_dir: Path, payload: dict) -> int:
     os.umask(0o077)
+    # Acquire ownership before reading resume state or regenerating live output.
+    # A duplicate launch must not truncate another worker's progress, and a
+    # resume must read the checkpoint protected by this same lock.
+    with engine.CheckpointLock(job_dir / "checkpoint.json"):
+        return _run_worker_locked(job_dir, payload)
+
+
+def _run_worker_locked(job_dir: Path, payload: dict) -> int:
     job, key = payload["job"], validate_key(payload.get("api_key"))
     if key:
         engine._REGISTERED_SECRETS.add(key)
@@ -317,48 +325,47 @@ def run_worker(job_dir: Path, payload: dict) -> int:
     signal.signal(signal.SIGINT, stop_signal)
     automatic_fallback_used = False
     state, error = "failed", None
-    with engine.CheckpointLock(args.checkpoint):
-        crawler.checkpoint("starting")
-        emit("state", status="running", message="بدأ عامل التنفيذ.")
-        try:
-            while True:
-                crawler.check_control()
-                try:
-                    report = crawler.run()
-                    state = "completed_warnings" if report["warnings"] else "completed"
-                    break
-                except (engine.SpiderError, engine.ShodanAPIError, OSError) as exc:
-                    if isinstance(exc, engine.PauseRequested):
-                        raise
-                    recoverable = engine.recoverable_source_error(exc)
-                    access_failure = getattr(exc, "http_status", None) in (401, 402, 403) or getattr(exc, "failure_kind", None) in ("auth", "permission", "quota")
-                    if recoverable and args.mode == "api" and args.api_fallback == "html" and access_failure and not automatic_fallback_used and crawler.report["requests_attempted"] < args.max_requests:
-                        automatic_fallback_used = True
-                        emit("warning", level="warning", message="تعذر الوصول عبر API؛ محاولة HTML مع حفظ النطاق والتقدم. " + engine.safe_detail(exc))
-                        crawler.switch_source("html", "automatic API fallback: " + engine.safe_detail(exc))
-                        continue
-                    if recoverable or str(exc).startswith("[REQUEST_LIMIT]"):
-                        crawler.input_reason = "source_error" if recoverable else "request_budget"
-                        emit("input_required", level="warning", message=engine.safe_detail(exc),
-                             detail={"reason": crawler.input_reason, "choices": ["resume", "change_source", "new_key", "cancel"]})
-                        raise engine.PauseRequested(engine.safe_detail(exc)) from None
+    crawler.checkpoint("starting")
+    emit("state", status="running", message="بدأ عامل التنفيذ.")
+    try:
+        while True:
+            crawler.check_control()
+            try:
+                report = crawler.run()
+                state = "completed_warnings" if report["warnings"] else "completed"
+                break
+            except (engine.SpiderError, engine.ShodanAPIError, OSError) as exc:
+                if isinstance(exc, engine.PauseRequested):
                     raise
-        except (engine.SpiderError, engine.ShodanAPIError, OSError, KeyboardInterrupt) as exc:
-            error = engine.safe_detail(exc)
-            paused = isinstance(exc, (engine.PauseRequested, KeyboardInterrupt))
-            state = "cancelled" if crawler.stop_reason == "cancel" else "waiting_input" if crawler.input_reason else "paused" if paused else "failed"
-            report = crawler.finish("paused" if paused else "failed", error)
-            report["partial_saved"] = True
-        crawler._finalizing = True
-        crawler.checkpoint(report["status"])
-        engine.save_results(args, report)
-        crawler.capture_output_hashes()
-        crawler.checkpoint(report["status"])
-        crawler._sync_live()
-        emit("final", status=state, error=error, stats=crawler.stats(),
-             ip_progress_inputs=crawler_progress_inputs(crawler),
-             message="اكتمل تنفيذ الفروع المكتشفة." if state.startswith("completed") else error,
-             input_reason=crawler.input_reason)
+                recoverable = engine.recoverable_source_error(exc)
+                access_failure = getattr(exc, "http_status", None) in (401, 402, 403) or getattr(exc, "failure_kind", None) in ("auth", "permission", "quota")
+                if recoverable and args.mode == "api" and args.api_fallback == "html" and access_failure and not automatic_fallback_used and crawler.report["requests_attempted"] < args.max_requests:
+                    automatic_fallback_used = True
+                    emit("warning", level="warning", message="تعذر الوصول عبر API؛ محاولة HTML مع حفظ النطاق والتقدم. " + engine.safe_detail(exc))
+                    crawler.switch_source("html", "automatic API fallback: " + engine.safe_detail(exc))
+                    continue
+                if recoverable or str(exc).startswith("[REQUEST_LIMIT]"):
+                    crawler.input_reason = "source_error" if recoverable else "request_budget"
+                    emit("input_required", level="warning", message=engine.safe_detail(exc),
+                         detail={"reason": crawler.input_reason, "choices": ["resume", "change_source", "new_key", "cancel"]})
+                    raise engine.PauseRequested(engine.safe_detail(exc)) from None
+                raise
+    except (engine.SpiderError, engine.ShodanAPIError, OSError, KeyboardInterrupt) as exc:
+        error = engine.safe_detail(exc)
+        paused = isinstance(exc, (engine.PauseRequested, KeyboardInterrupt))
+        state = "cancelled" if crawler.stop_reason == "cancel" else "waiting_input" if crawler.input_reason else "paused" if paused else "failed"
+        report = crawler.finish("paused" if paused else "failed", error)
+        report["partial_saved"] = True
+    crawler._finalizing = True
+    crawler.checkpoint(report["status"])
+    engine.save_results(args, report)
+    crawler.capture_output_hashes()
+    crawler.checkpoint(report["status"])
+    crawler._sync_live()
+    emit("final", status=state, error=error, stats=crawler.stats(),
+         ip_progress_inputs=crawler_progress_inputs(crawler),
+         message="اكتمل تنفيذ الفروع المكتشفة." if state.startswith("completed") else error,
+         input_reason=crawler.input_reason)
     return 0 if state.startswith("completed") else 75 if state in ("paused", "waiting_input", "cancelled") else 1
 
 
