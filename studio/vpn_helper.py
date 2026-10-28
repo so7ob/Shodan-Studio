@@ -99,7 +99,11 @@ class Broker:
             result = json.loads(run.stdout)
             if run.returncode or not result.get('ok'):
                 from .premium import fail, ERRORS
-                fail(result.get('code') if result.get('code') in ERRORS else 'NETWORK')
+                import math
+                wait = result.get('retry_after')
+                if wait == 'unbounded': wait = float('inf')
+                elif type(wait) not in (int, float) or not math.isfinite(wait) or wait < 0: wait = None
+                fail(result.get('code') if result.get('code') in ERRORS else 'NETWORK', wait)
             # Remember only an index into root-approved origins, never an origin
             # supplied by a subprocess or remote response. Survives restarts.
             index = result.get('gateway_index')

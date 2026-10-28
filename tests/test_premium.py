@@ -12,7 +12,7 @@ import uuid
 import zlib
 from unittest.mock import patch, MagicMock
 
-from studio.premium import (Premium, Gateway, countries, decode_key, encrypt_payload,
+from studio.premium import (Premium, PremiumError, Gateway, countries, decode_key, encrypt_payload,
                             decrypt_payload, check_error, private_json, read_private,
                             subscription, tunnel_config)
 from studio.vpn_helper import Broker
@@ -155,6 +155,30 @@ class PremiumTests(unittest.TestCase):
         self.assertNotIn(TOKEN,str(caught.exception));self.now+=31
         self.adapter().configuration('us-east')
         self.assertEqual(self.service.calls[-1][1]['installation_uuid'],UUID)
+    def test_upstream_wait_crosses_broker_and_survives_restart(self):
+        for wait in (7200, 'unbounded'):
+            with self.subTest(wait=wait):
+                self.premium.state.update(cooldown_until=0,cooldown_unbounded=False)
+                broker=object.__new__(Broker);broker.premium=self.premium;broker.code=self.root
+                response=MagicMock(returncode=0,stdout=json.dumps({'ok':False,'code':'RATE_LIMIT','retry_after':wait}))
+                with patch.object(broker,'_unprivileged',return_value=['fixed']),patch('studio.vpn_helper.subprocess.run',return_value=response) as launch:
+                    self.premium.transport=broker._premium_request
+                    with self.assertRaisesRegex(RuntimeError,'PREMIUM_RATE_LIMIT'):self.premium._request('account_info')
+                    launch.assert_called_once()
+                deadline=self.premium.state['cooldown_until']
+                if wait==7200:self.assertEqual(deadline,self.now+7200)
+                else:self.assertTrue(self.premium.state['cooldown_unbounded'])
+                self.now+=7199
+                restarted=self.adapter()
+                with patch.object(restarted,'transport') as transport:
+                    for _ in range(3):
+                        with self.assertRaisesRegex(RuntimeError,'PREMIUM_RATE_LIMIT'):restarted._request('account_info')
+                    transport.assert_not_called()
+                self.assertEqual(restarted.state['cooldown_until'],deadline)
+                if wait==7200:
+                    self.now+=1
+                    self.assertIn('available_countries',restarted._request('account_info'))
+                self.assertNotIn('Infinity',(self.root/'premium.json').read_text())
     def test_no_private_metadata_in_status_or_profile_or_account(self):
         self.premium.refresh()
         raw=json.dumps([self.premium.status(),self.premium.profiles()])
@@ -244,7 +268,7 @@ class CryptoTests(unittest.TestCase):
             def send(method,path,body,headers):
                 calls.append((host,method,path,body,headers))
                 self.assertNotIn(TOKEN.encode(),body)
-                if host=='old.example':reply.status=404;reply.read1.side_effect=[b'',b''];return
+                if host=='old.example':raise OSError('fixture connection loss')
                 env=json.loads(body);keys=json.loads(private.decrypt(base64.b64decode(env['key_payload']),rsa_padding.PKCS1v15()))
                 key=base64.b64decode(keys['aes_key']);iv=base64.b64decode(keys['aes_iv'])
                 payload=decrypt_payload(base64.b64decode(env['api_payload']),key,iv)
@@ -283,6 +307,43 @@ class CryptoTests(unittest.TestCase):
             self.assertEqual(gateway('account_info',{}),{'active_device_count':2})
         self.assertEqual([c.args[0] for c in connect.call_args_list],['bad.example','good.example'])
         self.assertEqual(gateway.successful_index,0)
+
+    def test_http_refusals_are_classified_before_body_without_gateway_fallback(self):
+        for status,code in ((401,'AUTH'),(403,'AUTH'),(404,'AUTH'),(429,'RATE_LIMIT')):
+            for body in (b'', b'<html>denied private-token</html>'):
+                gateway=object.__new__(Gateway);gateway.pem=b'unused'
+                gateway.endpoints=['https://one.example','https://two.example']
+                reply=MagicMock();reply.status=status;reply.getheader.return_value='7200'
+                reply.read1.side_effect=[body,b'']
+                conn=MagicMock();conn.getresponse.return_value=reply
+                with patch('studio.premium.encrypt_payload',return_value=(b'encrypted',b'k'*32,b'i'*32)),\
+                     patch('studio.premium.decrypt_payload') as decrypt,\
+                     patch('studio.premium.socket.getaddrinfo',return_value=[(2,1,6,'',('1.1.1.1',443))]),\
+                     patch('studio.premium.http.client.HTTPSConnection',return_value=conn) as connect:
+                    with self.assertRaisesRegex(PremiumError,'PREMIUM_'+code) as caught:gateway('account_info',{})
+                    self.assertEqual(caught.exception.retry_after,7200)
+                    connect.assert_called_once();conn.request.assert_called_once();conn.close.assert_called_once()
+                    reply.read1.assert_not_called();decrypt.assert_not_called()
+                    self.assertNotIn('private-token',str(caught.exception))
+
+    def test_retry_after_http_date_and_unbounded_header_cross_private_pipe(self):
+        from studio.premium import gateway_main
+        for header,expected in (('Thu, 01 Jan 1970 02:16:40 GMT',7200),('9'*400,'unbounded')):
+            gateway=object.__new__(Gateway);gateway.pem=b'unused'
+            gateway.endpoints=['https://one.example','https://two.example']
+            reply=MagicMock();reply.status=429;reply.getheader.return_value=header
+            conn=MagicMock();conn.getresponse.return_value=reply
+            request={'transport':{},'operation':'account_info','payload':{}}
+            with patch('studio.premium.Gateway',return_value=gateway),\
+                 patch('studio.premium.encrypt_payload',return_value=(b'encrypted',b'k'*32,b'i'*32)),\
+                 patch('studio.premium.socket.getaddrinfo',return_value=[(2,1,6,'',('1.1.1.1',443))]),\
+                 patch('studio.premium.http.client.HTTPSConnection',return_value=conn) as connect,\
+                 patch('studio.engine.time.time',return_value=1000),\
+                 patch('sys.stdin',new=MagicMock(buffer=io.BytesIO(json.dumps(request).encode()))),\
+                 patch('sys.stdout',new_callable=io.StringIO) as out:
+                gateway_main()
+                self.assertEqual(json.loads(out.getvalue()),{'ok':False,'code':'RATE_LIMIT','retry_after':expected})
+                connect.assert_called_once();reply.read1.assert_not_called()
 
     def test_https_cleartext_success_and_private_dns_are_rejected(self):
         gateway=object.__new__(Gateway);gateway.pem=b'unused';gateway.endpoints=['https://fixture.example']

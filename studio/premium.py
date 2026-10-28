@@ -9,6 +9,7 @@ import hashlib
 import http.client
 import ipaddress
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -39,8 +40,14 @@ ERRORS = {
 }
 
 
-def fail(code):
-    raise RuntimeError('[PREMIUM_' + code + '] ' + ERRORS[code]) from None
+class PremiumError(RuntimeError):
+    def __init__(self, code, retry_after=None):
+        super().__init__('[PREMIUM_' + code + '] ' + ERRORS[code])
+        self.retry_after = retry_after
+
+
+def fail(code, retry_after=None):
+    raise PremiumError(code, retry_after) from None
 
 
 def private_json(path, data):
@@ -225,6 +232,16 @@ class Gateway:
                     'Content-Type': 'application/json', 'X-Client-Request-ID': request_id,
                     'User-Agent': 'ShodanStudio-PremiumAdapter/1.0 (AmneziaVPN-5.0.3.0-protocol)'})
                 reply = connection.getresponse()
+                # A refusal is authoritative even when its body is empty, HTML,
+                # encrypted incorrectly, or too large. Never try another gateway.
+                from .engine import parse_retry_after
+                retry_after = parse_retry_after(reply.getheader('Retry-After'))
+                if reply.status >= 300:
+                    try:
+                        check_error({}, reply.status)
+                    except PremiumError as exc:
+                        exc.retry_after = retry_after
+                        raise
                 chunks, total = [], 0
                 while True:
                     if time.monotonic() >= deadline: fail('NETWORK')
@@ -239,9 +256,16 @@ class Gateway:
                     # Cleartext error envelopes are used by upstream, never accept cleartext success.
                     try: error = json.loads(raw)
                     except (ValueError, UnicodeError): continue
-                    if isinstance(error, dict): check_error(error, reply.status)
+                    if isinstance(error, dict):
+                        try: check_error(error, reply.status)
+                        except PremiumError as exc:
+                            exc.retry_after = retry_after
+                            raise
                     fail('RESPONSE')
-                check_error(result, reply.status)
+                try: check_error(result, reply.status)
+                except PremiumError as exc:
+                    exc.retry_after = retry_after
+                    raise
                 self.successful_index = index
                 return result
             except (OSError, http.client.HTTPException):
@@ -297,7 +321,8 @@ class Premium:
                     registered=bool(state.get('registered')), location_count=len(state.get('countries', [])),
                     catalog_source=state.get('catalog_source'), last_refresh=state.get('last_refresh'),
                     account=state.get('account', {}), adapter_version=CLIENT_VERSION,
-                    last_error=state.get('last_error'), cooldown_until=state.get('cooldown_until', 0))
+                    last_error=state.get('last_error'), cooldown_until=state.get('cooldown_until', 0),
+                    cooldown_unbounded=state.get('cooldown_unbounded', False))
 
     def enroll(self, key):
         clean = subscription(key)
@@ -312,7 +337,7 @@ class Premium:
     def _request(self, operation, **fields):
         if not self.state.get('api_key'):
             raise RuntimeError('اربط اشتراك Premium أولًا.')
-        if self.clock() < self.state.get('cooldown_until', 0):
+        if self.state.get('cooldown_unbounded') or self.clock() < self.state.get('cooldown_until', 0):
             fail(self.state.get('last_error') if self.state.get('last_error') in ERRORS else 'RATE_LIMIT')
         payload = dict(os_version='debian', app_version=CLIENT_VERSION, cli_name='AmneziaVPN',
                        distribution='github', app_language='en', installation_uuid=self.state['installation_uuid'],
@@ -326,10 +351,17 @@ class Premium:
         except RuntimeError as exc:
             # Only our fixed error codes are persisted, never remote exception/body strings.
             code = next((k for k in ERRORS if str(exc).startswith('[PREMIUM_' + k + ']')), 'NETWORK')
-            self.state.update(last_error=code, cooldown_until=self.clock() + (300 if code in {'LIMIT','AUTH','EXPIRED','CAPTCHA','RATE_LIMIT','UPDATE'} else 30))
+            wait = 300 if code in {'LIMIT','AUTH','EXPIRED','CAPTCHA','RATE_LIMIT','UPDATE'} else 30
+            server_wait = getattr(exc, 'retry_after', None)
+            if type(server_wait) in (int, float) and not math.isnan(server_wait) and server_wait >= 0:
+                wait = max(wait, server_wait)
+            deadline = self.clock() + wait
+            unbounded = not math.isfinite(deadline)
+            self.state.update(last_error=code, cooldown_unbounded=unbounded,
+                              cooldown_until=max(self.state.get('cooldown_until', 0), deadline) if not unbounded else self.state.get('cooldown_until', 0))
             self.save()
             fail(code)
-        self.state.update(last_error=None, cooldown_until=0)
+        self.state.update(last_error=None, cooldown_until=0, cooldown_unbounded=False)
         return result
 
     def _catalog(self, data, source):
@@ -403,7 +435,12 @@ def gateway_main():
         print(json.dumps({'ok': True, 'result': result, 'gateway_index': gateway.successful_index}))
     except Exception as exc:
         code = next((k for k in ERRORS if str(exc).startswith('[PREMIUM_' + k + ']')), 'NETWORK')
-        print(json.dumps({'ok': False, 'code': code}))
+        wait = getattr(exc, 'retry_after', None)
+        if type(wait) not in (int, float) or math.isnan(wait) or wait < 0:
+            wait = None
+        elif not math.isfinite(wait):
+            wait = 'unbounded'
+        print(json.dumps({'ok': False, 'code': code, 'retry_after': wait}, allow_nan=False))
 
 
 if __name__ == '__main__': gateway_main()
