@@ -24,8 +24,8 @@ from .config import JobValidationError, settings_from, validate_job, validate_ke
 from .store import Store, utc_now
 from .worker import atomic_text
 from .ip_progress import crawler_progress_inputs, progress_from_job
-from .vpn import VPNManager
-from .vpn_config import NETWORK_DEFAULTS
+from .vpn import NON_FAILOVER_ERRORS, VPNManager
+from .vpn_config import NETWORK_DEFAULTS, can_failover
 
 
 FINAL = {"completed", "completed_warnings", "cancelled", "failed"}
@@ -264,7 +264,7 @@ class JobManager:
                     fields["mode"] = ("api" if key else "html") if mode == "auto" else mode
                 return self._new_job(fields, key)
             if action == "pause":
-                if state == "queued":
+                if state == "queued" or (state == 'waiting_input' and self._active_id == job_id):
                     self.store.update_job(job_id, status="paused")
                 elif state in ACTIVE:
                     if state == "cancel_requested":
@@ -475,46 +475,88 @@ class JobManager:
             self.store.append_event(job_id, {'kind': 'network', 'level': 'warning', 'message': str(error),
                                             'phase': 'connection_lost'})
 
+    def _recover_vpn(self, job, *, initial_failure=False):
+        """The worker has exited and released its lease before this boundary."""
+        if not can_failover(job) or self._stop.is_set(): return None
+        if str(job.get('last_network_error', '')).startswith(NON_FAILOVER_ERRORS): return None
+        if self._get(job['id'])['status'] != 'waiting_input': return None
+        browser = job.get('browser_session_enabled', False)
+        try:
+            if browser:
+                self._browser_rpc(job['id'], {'action': 'stop'})
+                self._browser_job = None
+                self.vpn.audit('browser_stop', job_id=job['id'], reason='vpn_failover')
+            recovered = self.vpn.recover(self._get(job['id']), initial_failure=initial_failure)
+        except (RuntimeError, ValueError) as exc:
+            self.vpn.audit('failover', job_id=job['id'], reason=self._redact(str(exc)), status='failed')
+            return None
+        if not recovered: return None
+        with self._lock:
+            if self._get(job['id'])['status'] != 'waiting_input' or self._stop.is_set(): return None
+            self.store.update_job(job['id'], **recovered)
+        if browser:
+            from .browser_recovery import pending_url
+            try:
+                result = self._browser_rpc(job['id'], {'action': 'start',
+                    'url': pending_url(self._get(job['id']), self._path(job['id'])), 'defer_navigation': True})
+                with self._lock:
+                    stopped = self._get(job['id'])['status'] != 'waiting_input' or self._stop.is_set()
+                    if not stopped:
+                        self._browser_job = job['id']
+                        self._browser_deadline = time.monotonic() + 1800
+                        self.store.update_job(job['id'], browser_backend=result.get('backend', 'chromium'),
+                            browser_recovery_attempt={**job.get('browser_recovery_attempt', {}), 'state': 'reconnected'})
+                if stopped:
+                    self._browser_rpc(job['id'], {'action': 'stop'})
+                    return None
+                self.vpn.audit('browser_start', job_id=job['id'], reason='vpn_failover')
+            except (RuntimeError, ValueError, OSError) as exc:
+                with self._lock:
+                    if self._get(job['id'])['status'] == 'waiting_input':
+                        self.store.update_job(job['id'], input_reason='source_error',
+                            error='[BROWSER_SESSION] ' + self._redact(str(exc)))
+                self.vpn.audit('browser_start', job_id=job['id'], reason='vpn_failover', status='failed')
+                return None
+        return recovered
+
     def _execute(self, job):
         if job.get('network_mode', 'direct') == 'direct':
             self.store.update_job(job['id'], **self.vpn.prepare(job))
             return self._execute_worker(self._get(job['id']))
+        remaining_requests = job['settings']['max_requests']
+        prepared = None
         while not self._stop.is_set():
             job = self._get(job['id'])
-            try:
-                self.store.update_job(job['id'], network_phase='checking_network')
-                prepared = self.vpn.prepare(job)
-            except (RuntimeError, ValueError) as exc:
-                self._network_wait(job['id'], exc)
-                if job.get('browser_session_enabled'): return
+            if prepared is None:
                 try:
-                    prepared = self.vpn.recover(self._get(job['id']), initial_failure=True)
-                except (RuntimeError, ValueError):
-                    prepared = None
-                if not prepared: return
+                    self.store.update_job(job['id'], network_phase='checking_network')
+                    prepared = self.vpn.prepare(job)
+                except (RuntimeError, ValueError) as exc:
+                    self._network_wait(job['id'], exc)
+                    prepared = self._recover_vpn(self._get(job['id']), initial_failure=True)
+                    if not prepared: return
             with self._lock:
                 current = self._get(job['id'])
                 if current['status'] in ('cancelled', 'paused', 'cancel_requested', 'pause_requested') or self._stop.is_set():
                     if current['status'] in ('cancel_requested', 'pause_requested'):
                         self.store.update_job(job['id'], status='cancelled' if current['status'] == 'cancel_requested' else 'paused')
                     return
-                self.store.update_job(job['id'], **prepared, status='running', error=None, input_reason=None)
-            self._execute_worker(self._get(job['id']))
+                self.store.update_job(job['id'], **prepared, status='running', error=None, input_reason=None,
+                                      vpn_failover_requested=False)
+            prepared = None
+            worker_job = self._get(job['id'])
+            worker_job['settings'] = {**worker_job['settings'], 'max_requests': remaining_requests}
+            self._execute_worker(worker_job)
             current = self._get(job['id'])
-            if current['status'] != 'waiting_input' or current.get('input_reason') != 'network_error' or self._stop.is_set():
+            remaining_requests -= current.get('stats', {}).get('requests_this_run', 0)
+            failed = current.get('input_reason') == 'network_error' or (
+                current.get('input_reason') == 'rate_limit' and current.get('vpn_failover_requested'))
+            if current['status'] != 'waiting_input' or not failed or self._stop.is_set() or remaining_requests <= 0:
                 return
-            self._network_wait(job['id'], current.get('error') or 'Network unavailable.')
-            if current.get('browser_session_enabled'): return
-            try:
-                recovered = self.vpn.recover(self._get(job['id']))
-            except (RuntimeError, ValueError):
-                recovered = None
-            if not recovered: return
-            with self._lock:
-                latest = self._get(job['id'])
-                if latest['status'] != 'waiting_input' or self._stop.is_set():
-                    return
-                self.store.update_job(job['id'], **recovered, status='running')
+            if current.get('input_reason') == 'network_error':
+                self._network_wait(job['id'], current.get('error') or 'Network unavailable.')
+            prepared = self._recover_vpn(self._get(job['id']))
+            if not prepared: return
 
     def _execute_worker(self, job):
         job_id, path = job["id"], self._path(job["id"])
@@ -578,13 +620,13 @@ class JobManager:
                         state = event.get("status", "failed")
                         if current["status"] == "cancel_requested":
                             state = "cancelled"
-                        elif current["status"] == "pause_requested" and state == "completed":
-                            # A just-completed job is complete even if the click raced its final write.
-                            state = "completed"
+                        elif current["status"] == "pause_requested" and not state.startswith('completed'):
+                            state = "paused"
                         if state not in FINAL | RESUMABLE:
                             state = "failed"
                         changes["network_phase"] = "completed" if state.startswith("completed") else "connection_lost" if event.get("input_reason") == "network_error" else state
                         changes.update(status=state, error=event.get("error"), input_reason=event.get("input_reason"),
+                                       vpn_failover_requested=event.get('vpn_failover_requested') is True,
                                        finished_at=utc_now() if state in FINAL else None)
                         if event.get('input_reason') == 'browser_challenge':
                             changes['browser_challenge_id'] = secrets.token_hex(16)

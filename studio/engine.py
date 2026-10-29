@@ -2454,6 +2454,9 @@ class Crawler:
         self.report["warnings"].append({"code": code, "message": message, "facet": facet, "query": query})
         print(f"Warning [{code}] {safe_detail(message)} | facet={facet}", file=sys.stderr, flush=True)
 
+    def on_rate_limited(self, failure: BaseException, event: dict[str, Any]) -> None:
+        """Worker hook after a fresh 429 has saved its pending request and deadline."""
+
     def _request_with_rate_limits(self, operation: Callable[[], Any], template: dict[str, Any],
                                   label: str, counter: str | None = None) -> tuple[Any, dict[str, Any]]:
         """Preserve request scope through automatic retries and explicit pauses."""
@@ -2548,6 +2551,7 @@ class Crawler:
                 event["decision"] = "request_limit_reached"
                 raise SpiderError(f"[REQUEST_LIMIT] HTTP 429 received and --max-requests={self.args.max_requests} reached; no retry sent.",
                                   http_status=429, retry_after=server_wait)
+            self.on_rate_limited(failure, event)
             remaining = max(0.0, self.args.max_retry_wait -
                             (self.report["retry_wait_seconds"] - self._retry_budget_baseline))
             problem = None

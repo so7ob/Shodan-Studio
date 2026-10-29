@@ -123,10 +123,8 @@ class ManagerTests(unittest.TestCase):
         self.assertEqual(self.vpn._saved()[P2]['failure_count'],1)
         self.assertEqual(self.vpn._saved()[P2]['cooldown_until'],1060)
         self.assertEqual(self.vpn.events()[0]['status'],'failed')
-    def test_failover_requires_failed_health_and_respects_bounds_restart(self):
+    def test_failover_respects_bounds_after_restart(self):
         job = self.job(); self.vpn.prepare(job)
-        self.assertIsNone(self.vpn.recover(job))
-        self.assertEqual(self.provider.calls,[P1])
         self.provider.healthy = False
         self.provider.broken.add(P2)
         result = self.vpn.recover(job)
@@ -134,11 +132,11 @@ class ManagerTests(unittest.TestCase):
         self.assertEqual(result['failover_count'],2)
         restarted = VPNManager(Store(self.tmp.name),self.provider,clock=lambda:1001)
         self.assertIsNone(restarted.recover(self.store.get_job(job['id'])))
-    def test_destination_only_tls_error_does_not_rotate_a_healthy_tunnel(self):
+    def test_destination_only_tls_error_rotates_a_healthy_tunnel(self):
         job=self.job();self.vpn.prepare(job)
         with patch.object(self.provider,'health_check',return_value={**GOOD,'healthy':False,'tls':False,'tunnel_healthy':True}):
-            self.assertIsNone(self.vpn.recover(job))
-        self.assertEqual(self.provider.calls,[P1])
+            self.assertEqual(self.vpn.recover(job)['active_vpn_profile'],P2)
+        self.assertEqual(self.provider.calls,[P1,P2])
 
     def test_dashboard_remains_responsive_during_manual_connection(self):
         import threading,time

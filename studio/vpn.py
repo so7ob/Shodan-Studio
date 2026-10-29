@@ -7,10 +7,11 @@ from typing import Protocol
 
 from .store import _json, utc_now
 from .vpn_client import rpc
-from .vpn_config import NETWORK_DEFAULTS, policy, profile_id
+from .vpn_config import DEFAULT_FAILOVERS, NETWORK_DEFAULTS, can_failover, policy, profile_id
 
 PREMIUM_TERMINAL = tuple('[PREMIUM_' + code + ']' for code in
                          ('LIMIT', 'AUTH', 'EXPIRED', 'CAPTCHA', 'RATE_LIMIT', 'UPDATE', 'RESPONSE'))
+NON_FAILOVER_ERRORS = PREMIUM_TERMINAL + ('[TLS_CERTIFICATE]', '[API_TLS_CERTIFICATE]')
 
 
 class VPNProvider(Protocol):
@@ -270,32 +271,37 @@ class VPNManager:
 
     def recover(self, job, *, initial_failure=False):
         """Called only after worker exit/final checkpoint; never during writes."""
-        if job.get('network_mode', 'direct') != 'failover' or not job.get('vpn_failover_enabled'):
+        if not can_failover(job):
             return None
-        if str(job.get('last_network_error', '')).startswith(PREMIUM_TERMINAL):
-            self.audit('no_switch', job_id=job['id'], reason='premium_account_or_protocol_error')
-            return None
-        if str(job.get('last_network_error', '')).startswith('[VPN_DESTINATION]'):
-            self.audit('no_switch', job_id=job['id'], reason='tunnel_healthy_destination_error')
+        if str(job.get('last_network_error', '')).startswith(NON_FAILOVER_ERRORS):
+            reason = 'premium_account_or_protocol_error' if str(job['last_network_error']).startswith(PREMIUM_TERMINAL) else 'certificate_trust_error'
+            self.audit('no_switch', job_id=job['id'], reason=reason)
             return None
         count = job.get('failover_count', 0)
-        if count >= job.get('max_failovers', 2): return None
         current = job.get('active_vpn_profile') or job.get('preferred_vpn_profile')
         if not initial_failure:
-            check = self.provider.health_check()
-            if check.get('tunnel_healthy', check.get('healthy')):
-                self.audit('no_switch', job_id=job['id'], previous=current,
-                           reason='tunnel_healthy_destination_error', verified=True)
-                return None
+            try:
+                check = self.provider.health_check()
+            except RuntimeError as exc:
+                if str(exc).startswith(NON_FAILOVER_ERRORS): return None
+                check = {'healthy': False}
             self._record_check(current, check)
         candidates = {p['id']: p for p in self.profiles()}
-        for ident in job.get('allowed_vpn_profiles', []):
+        # A working tunnel may still fail for Shodan. Cool down that exit and
+        # start after it in the allowlist so all configured profiles get a turn.
+        if current in candidates:
+            self._save({**candidates[current], 'cooldown_until': self.clock() + 60})
+        allowed = job.get('allowed_vpn_profiles', [])
+        if current in allowed:
+            start = allowed.index(current) + 1
+            allowed = allowed[start:] + allowed[:start]
+        for ident in allowed:
             latest = self.store.get_job(job['id'])
             if latest and latest['status'] in {'cancelled', 'paused', 'cancel_requested', 'pause_requested'}:
                 return None
             p = candidates.get(ident)
             if ident == current or not p or not p['enabled'] or p.get('cooldown_until', 0) > self.clock(): continue
-            if count >= job.get('max_failovers', 2): break
+            if count >= job.get('max_failovers', DEFAULT_FAILOVERS): break
             count += 1
             # Persist attempts BEFORE the side effect. Restart cannot reset the bound.
             self.store.update_job(job['id'], failover_count=count, network_phase='switching_vpn',
@@ -303,8 +309,9 @@ class VPNManager:
             try:
                 check = self.connect(ident, job_id=job['id'], reason=job.get('last_network_error') or 'network_unavailable')
             except RuntimeError as exc:
-                if str(exc).startswith(PREMIUM_TERMINAL + ('[VPN_DESTINATION]',)): return None
+                if str(exc).startswith(NON_FAILOVER_ERRORS): return None
                 continue
             return dict(active_vpn_profile=ident, current_egress_ip=check['egress_ip'], network_health='healthy',
-                        network_phase='resuming_extraction', last_failover_at=utc_now(), failover_count=count)
+                        network_phase='resuming_extraction', last_network_error=None,
+                        last_failover_at=utc_now(), failover_count=count)
         return None

@@ -46,9 +46,11 @@ Userspace AmneziaWG namespace behavior and supported parameters must be verified
 before acceptance. Official awg tooling is the configuration adapter; no GUI
 automation or invented client CLI. Unsupported profiles remain visibly unsupported.
 
-Network errors are classified independently of HTTP auth/quota/rate limit errors.
+Transport errors remain distinct from HTTP auth/quota errors. Fresh HTTP 429
+responses can request enabled failover after preserving their retry deadline.
 Bounded worker retries count against request budgets. The worker saves and exits
 before the parent verifies health and selects another allowed, enabled profile.
+Persistent Shodan destination failures qualify even when the tunnel is healthy.
 Switch limits survive restart; failures receive cooldowns and an audit record.
 An unsuccessful switch attempts restoration and pauses safely. Management remains
 in the host namespace; the old host Amnezia connection is never switched.

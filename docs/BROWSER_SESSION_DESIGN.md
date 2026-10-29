@@ -15,6 +15,12 @@ slot until closed or idle-expired. Resume uses the same browser profile and page
 for the existing facet parser. A challenge/login/denial pauses the worker at its
 checkpoint; manual interaction is disabled while extraction runs. The browser
 must be closed before changing the VPN; switching never transfers clearance.
+Enabled Failover now closes the browser after the worker releases its lease,
+switches on a fresh 429 or persistent Shodan transport failure, and starts a blank
+browser using the new VPN profile's own directory. The worker performs the first
+navigation through its normal request budget and persisted Retry-After checks.
+Saved waits alone cannot request another switch. Login/challenge states still
+require interaction when the newly selected profile is not authorized.
 
 A separate private profile directory stores browser state, outside application
 SQLite and out of static/download endpoints. Only root and the browser UID can

@@ -1,5 +1,26 @@
 # VPN Manager / Premium validation — 2026-10-24
 
+## Shodan failover update — 2026-10-29
+
+Enabled Failover now switches on a fresh Shodan HTTP 429 and persistent Shodan
+connection failures, including a healthy-tunnel/destination-failure result.
+Browser-enabled jobs close their browser after worker exit and reopen it on the
+new VPN profile without navigating ahead of the saved retry deadline. The default
+is 20 attempts for new jobs, configurable from 0 to 100; existing limits remain.
+
+`tests/test_vpn_failover.py` covers real worker subprocesses with synthetic Shodan
+responses and simulated VPN/browser RPC: 429 after eight saved pages, a switch,
+and completion with all 292 unique fixture IPs, for browser and ordinary HTML.
+It checks remaining request budgets, preserved waits, no repeated switches from
+saved waits, cancellation/pause races, per-profile browser startup without early
+navigation, more than five bounded switches, and certificate/account exclusions.
+`tests/browser_vpn.cjs` checks the default and maximum through the Arabic UI,
+persisted edits, keyboard entry, 375/1280 widths and axe in the modified regions.
+
+These tests use local fixtures; they do not establish production deployment or
+live Shodan acceptance. The older no-switch rule for destination-only errors in
+the historical evidence below has been superseded by this update.
+
 ## Follow-up: switching latency and HTML access
 
 Version **1.3.1** follows the original acceptance below. It remembers the last

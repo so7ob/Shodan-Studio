@@ -221,13 +221,11 @@ class PremiumTests(unittest.TestCase):
         provider=FakeProvider();vpn=VPNManager(Store(self.root/'jobs-db'),provider)
         job=dict(id='1'*32,network_mode='failover',vpn_failover_enabled=True,
                  last_network_error='[PREMIUM_LIMIT] subscription limit',max_failovers=2)
-        self.assertIsNone(vpn.recover(job,initial_failure=True))
-        self.assertEqual(provider.calls,[])
-        self.assertEqual(vpn.events()[0]['reason'],'premium_account_or_protocol_error')
-        job['last_network_error']='[VPN_DESTINATION] DNS failed on a healthy tunnel'
-        self.assertIsNone(vpn.recover(job,initial_failure=True))
-        self.assertEqual(provider.calls,[])
-        self.assertEqual(vpn.events()[0]['reason'],'tunnel_healthy_destination_error')
+        for code in ('LIMIT','AUTH','EXPIRED','CAPTCHA','RATE_LIMIT','UPDATE','RESPONSE'):
+            job['last_network_error']='[PREMIUM_'+code+'] fixture'
+            self.assertIsNone(vpn.recover(job,initial_failure=True))
+            self.assertEqual(provider.calls,[])
+            self.assertEqual(vpn.events()[0]['reason'],'premium_account_or_protocol_error')
 
 
 class CryptoTests(unittest.TestCase):

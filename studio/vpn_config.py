@@ -5,8 +5,15 @@ import re
 
 PROFILE_ID = re.compile(r'[a-f0-9]{32}')
 MODES = {'direct', 'preferred', 'failover', 'manual'}
+DEFAULT_FAILOVERS = 20
+MAX_FAILOVERS = 100
 NETWORK_DEFAULTS = dict(network_mode='direct', preferred_vpn_profile=None,
-                        allowed_vpn_profiles=[], vpn_failover_enabled=False, max_failovers=2)
+                        allowed_vpn_profiles=[], vpn_failover_enabled=False, max_failovers=DEFAULT_FAILOVERS)
+
+
+def can_failover(job):
+    return (job.get('network_mode') == 'failover' and job.get('vpn_failover_enabled', False)
+            and job.get('failover_count', 0) < job.get('max_failovers', DEFAULT_FAILOVERS))
 
 
 def profile_id(value):
@@ -22,8 +29,8 @@ def policy(payload=None):
     result = {**NETWORK_DEFAULTS, **payload}
     if result['network_mode'] not in MODES:
         raise ValueError('سياسة اتصال غير مدعومة.')
-    if type(result['max_failovers']) is not int or not 0 <= result['max_failovers'] <= 5:
-        raise ValueError('حد التبديل يجب أن يكون بين صفر وخمسة.')
+    if type(result['max_failovers']) is not int or not 0 <= result['max_failovers'] <= MAX_FAILOVERS:
+        raise ValueError(f'حد التبديل يجب أن يكون بين صفر و{MAX_FAILOVERS}.')
     if type(result['vpn_failover_enabled']) is not bool:
         raise ValueError('خيار التبديل غير صالح.')
     allowed = result['allowed_vpn_profiles']
@@ -146,5 +153,5 @@ def network_error(exc):
         return 'TLS'
     if isinstance(exc, OSError) and exc.errno in (errno.ENETUNREACH, errno.EHOSTUNREACH):
         return 'NETWORK_UNREACHABLE'
-    match = re.match(r'^\[(?:API_)?(DNS|DNS_PROXY|TIMEOUT|TLS|CONNECTION_RESET|NETWORK_UNREACHABLE|CONNECTION|CONNECT|RESPONSE_READ)\]', str(exc))
+    match = re.match(r'^\[(?:API_)?(DNS|DNS_PROXY|TIMEOUT|TLS|CONNECTION_RESET|NETWORK_UNREACHABLE|CONNECTION|CONNECT|RESPONSE_READ|BROWSER_NETWORK)\]', str(exc))
     return match[1] if match else None

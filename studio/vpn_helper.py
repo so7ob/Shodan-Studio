@@ -300,6 +300,7 @@ class Broker:
         checks = ', '.join(k + '=' + ('ok' if report.get(k) else 'failed') for k in
                            ('dns', 'tcp', 'tls', 'http', 'handshake', 'route_verified', 'leak_protection'))
         prefix = '[VPN_DESTINATION] ' if report.get('tunnel_healthy') else ''
+        if report.get('error') == 'SSLCertVerificationError': prefix = '[TLS_CERTIFICATE] '
         raise RuntimeError(prefix + 'Tunnel verification failed; no worker was started. ' + checks)
 
     def switch_profile(self, ident):
