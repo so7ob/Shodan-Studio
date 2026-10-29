@@ -90,12 +90,12 @@ class BrowserBroker:
         except (OSError,ValueError,BrowserPipeError):
             self.close();raise RuntimeError('[BROWSER_SESSION] Browser connection lost.') from None
 
-    def start(self,job_id,url):
+    def start(self,job_id,url,*,defer_navigation=False):
         from .vpn_helper import IP,NS,SETPRIV,ENV,NFT
         profile_id(job_id);facet_url(url)
         if self.status()['running']:
             if self.job!=job_id:raise RuntimeError('أغلق جلسة المهمة الأخرى أولًا.')
-            return self.request({'action':'frame'})
+            return self.status() if defer_navigation else self.request({'action':'frame'})
         account=pwd.getpwnam('shodan-browser')
         if account.pw_uid in (0,self.broker.uid):raise RuntimeError('Browser needs a separate unprivileged account.')
         python = '/usr/bin/python3'; module = 'studio.browser_session'
@@ -125,7 +125,10 @@ class BrowserBroker:
                                      cwd=self.broker.code,env=env,start_new_session=True)
         self.job=job_id;self.buffer=b'';self.last_used=time.monotonic()
         try:
-            self.reply()
+            ready = self.reply()
+            # Failover starts a blank browser. The worker owns the navigation,
+            # request budget and saved Retry-After, including for the first page.
+            if defer_navigation: return ready
             # Page.navigate can return before Chromium has painted its first
             # compositor frame. Poll it separately; preserve the live session.
             return self.request({'action':'navigate','url':url})
@@ -136,6 +139,8 @@ class BrowserBroker:
         if not isinstance(data,dict):raise ValueError('Invalid browser input.')
         if self.broker.running_job:raise RuntimeError('أوقف المهمة وانتظر حفظ Checkpoint قبل التحكم في المتصفح.')
         if data.get('action')=='start' and set(data)=={'action','url'}:return self.start(job,data['url'])
+        if data.get('action')=='start' and set(data)=={'action','url','defer_navigation'} and data['defer_navigation'] is True:
+            return self.start(job,data['url'],defer_navigation=True)
         if data=={'action':'stop'} and not self.status()['running']:self.close();return self.status()
         if self.job!=job:raise RuntimeError('[BROWSER_SESSION] لا توجد جلسة لهذه المهمة؛ افتحها أولًا.')
         if data=={'action':'stop'}:self.close();return self.status()

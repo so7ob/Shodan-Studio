@@ -176,7 +176,9 @@ class Session:
     def navigate(self,url):
         facet_url(url);self.expected=url;self.document={};self.ready=False;self.page_url=url
         result=self.call('Page.navigate',{'url':url})
-        if result.get('errorText'):raise RuntimeError('[BROWSER_NETWORK] Browser navigation failed.')
+        if result.get('errorText'):
+            code = 'TLS_CERTIFICATE' if 'ERR_CERT_' in result['errorText'] else 'BROWSER_NETWORK'
+            raise RuntimeError(f'[{code}] Browser navigation failed.')
         return self.status()
 
     def html(self):

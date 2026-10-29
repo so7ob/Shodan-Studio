@@ -102,8 +102,13 @@ class PatchrightSession:
                 'user_agent': getattr(self, 'user_agent', '')}
 
     async def navigate(self, url):
+        from patchright.async_api import Error
         facet_url(url); self.expected = url; self.ready = False; self.document = {}; self.page_url = url
-        await self.page.goto(url, wait_until='commit', timeout=25000)
+        try:
+            await self.page.goto(url, wait_until='commit', timeout=25000)
+        except Error as exc:
+            code = 'TLS_CERTIFICATE' if 'ERR_CERT_' in str(exc) else 'BROWSER_NETWORK'
+            raise RuntimeError(f'[{code}] Browser navigation failed.') from None
         return await self.status_result()
 
     async def html(self):

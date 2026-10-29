@@ -23,8 +23,8 @@ window.ShodanVPN = (() => {
   }
   function fields(prefix) {
     return `<label class="field"><span>سياسة الاتصال</span><select id="${prefix}-mode"><option value="direct">Direct — مسار الخادم الحالي</option><option value="preferred">Preferred VPN — ملف محدد</option><option value="failover">VPN Failover — تبديل محدود</option><option value="manual">Manual — اتصال يدوي</option></select></label>
-      <div id="${prefix}-vpn" hidden><label class="field"><span>ملف الاتصال المفضل</span><select id="${prefix}-profile"></select></label><label class="field"><span>الملفات المسموحة للتبديل (Ctrl أو ⌘ لاختيار عدة ملفات)</span><select id="${prefix}-allowed" multiple size="3"></select></label><label class="field"><span>أقصى محاولات التبديل طوال المهمة</span><input id="${prefix}-max" type="number" min="0" max="5" value="2"></label><label class="check-label"><input id="${prefix}-enabled" type="checkbox">تفعيل التبديل التلقائي عند ثبوت عطل الشبكة</label></div>
-      <p class="muted small-text">Direct يتبع شبكة الخادم الحالية، وقد تكون متصلة بـ Amnezia. سياسات VPN تتوقف بأمان إن تعذر النفق.</p>`;
+      <div id="${prefix}-vpn" hidden><label class="field"><span>ملف الاتصال المفضل</span><select id="${prefix}-profile"></select></label><label class="field"><span>الملفات المسموحة للتبديل (Ctrl أو ⌘ لاختيار عدة ملفات)</span><select id="${prefix}-allowed" multiple size="3"></select></label><label class="field"><span>أقصى محاولات التبديل طوال المهمة</span><input id="${prefix}-max" type="number" min="0" max="100" value="20"></label><label class="check-label"><input id="${prefix}-enabled" type="checkbox">تبديل تلقائي عند 429 أو فشل الاتصال بـ Shodan</label></div>
+      <p class="muted small-text">Direct يتبع شبكة الخادم الحالية، وقد تكون متصلة بـ Amnezia. Failover يبدّل بعد حفظ التقدم، ويحتفظ بمهلة انتظار المصدر.</p>`;
   }
   function fillOptions(prefix, values) {
     const options = snapshot.profiles.filter(p => p.enabled);
@@ -38,7 +38,7 @@ window.ShodanVPN = (() => {
     if (values) {
       $(`${prefix}-mode`).value = values.network_mode || 'direct';
       $(`${prefix}-enabled`).checked = !!values.vpn_failover_enabled;
-      $(`${prefix}-max`).value = values.max_failovers ?? 2;
+      $(`${prefix}-max`).value = values.max_failovers ?? 20;
     }
     togglePolicy(prefix);
   }
@@ -123,7 +123,7 @@ window.ShodanVPN = (() => {
     const p = profile(job.active_vpn_profile || job.preferred_vpn_profile);
     $('job-network-state').textContent = `${job.network_mode || 'direct'} · ${p?.name || (job.network_mode && job.network_mode !== 'direct' ? 'ملف VPN غير متاح' : 'مسار الخادم')} · ${country(p?.country)} · ${job.current_egress_ip || 'عنوان الخروج غير متحقق'} · ${health[job.network_health] || 'غير مختبر'}`;
     $('job-network-phase').textContent = phases[job.network_phase] || '';
-    $('job-network-count').textContent = `محاولات التبديل: ${job.failover_count || 0} / ${job.max_failovers ?? 2}`;
+    $('job-network-count').textContent = `محاولات التبديل: ${job.failover_count || 0} / ${job.max_failovers ?? 20}`;
     const sourceDenied = /\[HTTP_(401|403)\]/.test(job.error || '') && job.mode === 'html';
     $('job-network-error').textContent = sourceDenied
       ? 'رفض Shodan طلب HTML' + ((job.error || '').includes('[BROWSER_CHALLENGE]') ? ' بسبب تحقق متصفح تفاعلي' : ' (HTTP 401/403)') + '. نجاح النفق لا يثبت السماح بالبحث. بقيت النتائج ونقطة الاستكمال محفوظة. افحص وصول الموقع من صفحة التشخيص؛ إعادة الاستكمال ستعيد الطلب وقد تُرفض مجددًا.'

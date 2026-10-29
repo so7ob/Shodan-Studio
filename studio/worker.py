@@ -16,7 +16,7 @@ import urllib.parse
 from . import engine
 from .config import settings_from, validate_key
 from .ip_progress import crawler_progress_inputs
-from .vpn_config import network_error
+from .vpn_config import can_failover, network_error
 
 
 def atomic_text(path: Path, content: str) -> None:
@@ -61,6 +61,7 @@ def build_args(job_dir: Path, job: dict, key: str | None):
     # Explicit mode keeps an inherited environment key from choosing the source.
     os.environ.pop("SHODAN_API_KEY", None)
     args = engine.parse_args(argv)
+    args.studio_vpn_failover = can_failover(job)
     args.studio_browser_job = job['id'] if job.get('browser_session_enabled') else None
     if args.studio_browser_job and (job['mode'] != 'html' or job.get('network_mode','direct') == 'direct'):
         raise engine.SpiderError('[BROWSER_SESSION] Browser extraction requires HTML and an isolated VPN.')
@@ -143,6 +144,7 @@ class StudioCrawler(engine.Crawler):
         self.demo_data = DemoData(args.effective_query) if demo else None
         self.stop_reason = None
         self.input_reason = None
+        self.vpn_failover_requested = False
         self._last_snapshot = 0.0
         self._live_seen = None
         self._reported_ips = set()
@@ -211,6 +213,19 @@ class StudioCrawler(engine.Crawler):
         emit("input_required", level="warning", message=message,
              detail={"reason": "rate_limit", "choices": ["resume", "cancel"]})
         return False
+
+    def on_rate_limited(self, failure, event):
+        if not self.args.studio_vpn_failover or self.wait_unbounded:
+            return
+        self.check_control()
+        self.input_reason = 'rate_limit'
+        self.vpn_failover_requested = True
+        event['decision'] = 'vpn_failover'
+        self.checkpoint('vpn_failover')
+        detail = engine.safe_detail(failure)
+        emit('network', phase='connection_lost', error=detail,
+             message='تقييد طلبات Shodan؛ حُفظ التقدم ومهلة الانتظار لتبديل VPN.')
+        raise engine.PauseRequested(detail)
 
     def _sync_live(self):
         if self._live_seen is None:
@@ -381,7 +396,7 @@ def _run_worker_locked(job_dir: Path, payload: dict) -> int:
     emit("final", status=state, error=error, stats=crawler.stats(),
          ip_progress_inputs=crawler_progress_inputs(crawler),
          message="اكتمل تنفيذ الفروع المكتشفة." if state.startswith("completed") else error,
-         input_reason=crawler.input_reason)
+         input_reason=crawler.input_reason, vpn_failover_requested=crawler.vpn_failover_requested)
     return 0 if state.startswith("completed") else 75 if state in ("paused", "waiting_input", "cancelled") else 1
 
 

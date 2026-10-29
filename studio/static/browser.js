@@ -5,6 +5,7 @@ window.ShodanBrowser = (() => {
   const states={opening:'جارٍ فتح متصفح التحقق…',failed:'تعذّر فتح المتصفح؛ راجع سجل المهمة.',closed:'الجلسة مغلقة',awaiting_verification:'أكمل التحقق أو تسجيل الدخول، ثم افحص الصفحة.',browser_challenge:'لم يسمح Shodan بالوصول بعد. المهمة متوقفة ونتائجها محفوظة. فحص الصفحة لا يحل تحقق Cloudflare، وتكرار فتح الجلسة لا يضمن قبوله. يلزم ظهور نتائج صالحة قبل الاستكمال.',rate_limited:'قيّد Shodan عدد الطلبات (429). انتظر موعد الاستكمال المحفوظ؛ لا حاجة إلى تكرار الضغط على التحقق.',access_denied:'رفض Shodan الوصول. راجع الصفحة.',ready:'تم التحقق من صفحة نتائج صالحة؛ يمكنك الاستكمال.'};
   async function send(input) {return ctx.api(`/api/jobs/${activeJob}/browser`,{method:'POST',body:JSON.stringify(input)});}
   states.off_task_page='الصفحة الحالية ليست نتائج المهمة. بعد إتمام تسجيل الدخول اضغط «العودة إلى نتائج المهمة»، ثم «فحص الصفحة».';
+  states.reconnected='فُتحت جلسة المتصفح تلقائيًا بعد تبديل VPN؛ تُحترم مهلة انتظار المصدر.';
   function controls() {
     $('browser-resume').disabled=inputBusy||opening||lastResult.state!=='ready';
     $('browser-return').disabled=inputBusy||opening||!lastResult.can_return_to_results;
