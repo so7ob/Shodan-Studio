@@ -1,15 +1,20 @@
 /* Presentation only: no requests, timers, credentials or retry decisions. */
 (function (root) {
   "use strict";
+  function validatedDeadlineMs(stats = {}) {
+    if (stats.wait_unbounded === true) return null;
+    const seconds = stats.wait_until;
+    if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds <= 0) return null;
+    const deadline = seconds * 1000;
+    return Number.isFinite(new Date(deadline).getTime()) ? deadline : null;
+  }
   function viewModel(job = {}, now = Date.now(), formatDate = value => new Date(value).toLocaleString("ar")) {
     const stats = job.stats || {};
     const raw = typeof job.error === "string" ? job.error : job.error?.message || job.error?.detail || "";
     const checkpoint = job.has_checkpoint === true
       ? "نقطة حفظ متاحة؛ يمكن متابعة التقدم المحفوظ عندما يسمح المصدر."
       : "لا توجد نقطة حفظ متاحة بعد؛ لا يمكن تأكيد استعادة الطلب الأخير.";
-    const deadline = typeof stats.wait_until === "number" && Number.isFinite(stats.wait_until) && stats.wait_until > 0
-      ? stats.wait_until * 1000 : NaN;
-    const deadlineMs = Number.isFinite(new Date(deadline).getTime()) ? deadline : null;
+    const deadlineMs = validatedDeadlineMs(stats);
     let kind = "paused", title = "التنفيذ متوقف", message = "راجع حالة المهمة ثم اختر الاستكمال يدويًا عند الاستعداد.";
     if (stats.wait_unbounded === true) {
       kind = "manual_hold"; title = "حظر انتظار بلا موعد قابل للعرض";
@@ -44,6 +49,6 @@
     }
     return { kind, title, message, checkpoint, deadlineMs, technicalError: String(raw) };
   }
-  if (typeof module === "object" && module.exports) module.exports = { viewModel };
-  else root.ShodanJobGuidance = { viewModel };
+  if (typeof module === "object" && module.exports) module.exports = { viewModel, validatedDeadlineMs };
+  else root.ShodanJobGuidance = { viewModel, validatedDeadlineMs };
 })(typeof globalThis !== "undefined" ? globalThis : this);

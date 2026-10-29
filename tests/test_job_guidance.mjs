@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-const { viewModel } = createRequire(import.meta.url)('../studio/static/job_guidance.js');
+const { viewModel, validatedDeadlineMs } = createRequire(import.meta.url)('../studio/static/job_guidance.js');
 const now = 1700000000000;
 const format = value => new Date(value).toISOString();
 const job = { status: 'waiting_input', has_checkpoint: true, input_reason: 'rate_limit' };
@@ -29,12 +29,21 @@ test('unbounded wait takes precedence even if an old deadline has elapsed', () =
   assert.doesNotMatch(vm.message, /1970/);
 });
 test('invalid deadlines never become an expired wait', () => {
-  for (const wait_until of [null, false, '1700000000', -1, 0, NaN, Infinity, 1e100]) {
+  for (const wait_until of [null, false, '1700000000', '2099-01-01T00:00:00Z', -1, 0, NaN, Infinity, 1e100]) {
     const vm = viewModel({ ...job, stats: { wait_until } }, now, format);
     assert.equal(vm.kind, 'rate_limit');
     assert.equal(vm.deadlineMs, null);
     assert.match(vm.message, /لا يوجد موعد/);
   }
+});
+test('countdown and guidance share validation with unbounded-hold precedence', () => {
+  for (const stats of [{}, { wait_until: now / 1000 + 1 }, { wait_until: now / 1000 - 1 },
+    { wait_until: '2099-01-01T00:00:00Z' }, { wait_until: 1e100 },
+    { wait_until: now / 1000 + 1, wait_unbounded: true }]) {
+    assert.equal(validatedDeadlineMs(stats), viewModel({ ...job, stats }, now, format).deadlineMs);
+  }
+  assert.equal(validatedDeadlineMs({ wait_until: now / 1000 + 1 }), now + 1000);
+  assert.equal(validatedDeadlineMs({ wait_until: now / 1000 + 1, wait_unbounded: true }), null);
 });
 test('missing checkpoint is not described as a saved restart point', () => {
   for (const has_checkpoint of [false, undefined, 'true']) {

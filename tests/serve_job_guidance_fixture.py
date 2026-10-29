@@ -25,6 +25,7 @@ def main():
         manager.vpn.provider = FakeProvider()
         manager.store.setup(manager.store.setup_token(), 'fixture', 'local-fixture-password-123!')
         states = {
+            'malformed': ('2099-01-01T00:00:00Z', False, False, 'rate_limit', '[HTTP_429] synthetic malformed deadline'),
             'future': (time.time() + 3600, False, True, 'rate_limit', '[HTTP_429] synthetic wait'),
             'manual': (time.time() + 7200, True, True, 'rate_limit', '[RATE_LIMIT_WAIT_LIMIT] synthetic hold'),
             'expired': (time.time() - 60, False, True, 'rate_limit', '[HTTP_429] synthetic expired wait'),

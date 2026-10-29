@@ -24,6 +24,7 @@ const path = require('node:path');
       await page.waitForFunction(title => document.getElementById('detail-title').textContent === title, 'Fixture · ' + name);
     }
     await select('future');
+    assert.ok(await page.locator('#wait-countdown').isVisible());
     assert.match(await page.locator('#job-alert-message').innerText(), /موعد المحاولة المحفوظ/);
     assert.match(await page.locator('#job-checkpoint-status').innerText(), /نقطة حفظ متاحة/);
     for (let i = 0; i < 3; i++) {
@@ -35,8 +36,15 @@ const path = require('node:path');
     await page.reload(); await select('future');
     assert.match(await page.locator('#job-alert-message').innerText(), /موعد المحاولة المحفوظ/);
     await select('expired');
+    assert.ok(await page.locator('#wait-countdown').isHidden());
     assert.match(await page.locator('#job-alert-title').innerText(), /انتهت مهلة/);
     assert.match(await page.locator('#job-alert-message').innerText(), /لم تُرسل اللوحة/);
+    await select('malformed');
+    assert.match(await page.locator('#job-alert-message').innerText(), /لا يوجد موعد انتظار صالح/);
+    assert.ok(await page.locator('#wait-countdown').isHidden());
+    await page.reload(); await select('malformed');
+    assert.match(await page.locator('#job-alert-message').innerText(), /لا يوجد موعد انتظار صالح/);
+    assert.ok(await page.locator('#wait-countdown').isHidden());
     await select('missing');
     assert.match(await page.locator('#job-checkpoint-status').innerText(), /لا توجد نقطة حفظ/);
     await select('denied');
