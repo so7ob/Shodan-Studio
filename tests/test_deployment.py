@@ -19,7 +19,7 @@ class DeploymentTests(unittest.TestCase):
                               timeout=15)
 
     def test_bash_syntax(self):
-        for name in ("start.sh", "install-debian.sh"):
+        for name in ("start.sh", "install-debian.sh", "tools/install_vpn_helper.sh"):
             with self.subTest(script=name):
                 result = self.command("bash", "-n", str(ROOT / name))
                 self.assertEqual(result.returncode, 0, result.stderr)
@@ -96,6 +96,33 @@ class DeploymentTests(unittest.TestCase):
         self.assertIn("--data-dir /var/lib/shodan-studio", unit)
         self.assertIn("WorkingDirectory=/opt/shodan-studio/current\n", unit)
         self.assertNotIn("api-key", unit)
+
+    @unittest.skipUnless(shutil.which("systemd-tmpfiles"), "requires systemd-tmpfiles")
+    def test_vpn_runtime_directories_recover_after_reboot_without_deleting_state(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = root / "etc/tmpfiles.d/shodan-studio-vpn.conf"
+            config.parent.mkdir(parents=True)
+            # Exercise creation/recreation without requiring root in CI.
+            rules = (ROOT / "deploy/shodan-studio-vpn.conf").read_text()
+            config.write_text(rules.replace("root root", f"{os.geteuid()} {os.getegid()}"))
+            command = ["systemd-tmpfiles", "--root", str(root), "--create", "shodan-studio-vpn.conf"]
+            for boot in range(2):
+                result = self.command(*command)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                for name in ("netns", "amneziawg"):
+                    directory = root / "run" / name
+                    self.assertTrue(directory.is_dir())
+                    self.assertEqual(directory.stat().st_mode & 0o777, 0o755)
+                    sentinel = directory / "existing-resource"
+                    sentinel.write_text("preserve")
+                result = self.command(*command)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                for name in ("netns", "amneziawg"):
+                    sentinel = root / "run" / name / "existing-resource"
+                    self.assertEqual(sentinel.read_text(), "preserve")
+                if boot == 0:
+                    shutil.rmtree(root / "run")  # Reboot clears this fixture's volatile state.
 
 
 if __name__ == "__main__":
