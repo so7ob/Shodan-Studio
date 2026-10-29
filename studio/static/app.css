@@ -13,3 +13,6 @@
 /* Contain the table's absolute screen-reader labels inside its RTL scroller. */
 .table-scroll{position:relative}
 @media(max-width:760px){.detail-heading-main{flex-basis:100%}.detail-actions{justify-content:flex-start}}
+/* Keep paused-job guidance readable beside its icon on narrow screens. */
+.job-alert details{margin-top:8px}.job-alert summary{cursor:pointer}
+@media(max-width:760px){.job-alert>div{flex:1 1 calc(100% - 36px)}}

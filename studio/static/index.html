@@ -9,6 +9,7 @@
   <link rel="stylesheet" href="/static/app.css">
   <link rel="stylesheet" href="/static/ip_progress.css">
   <script src="/static/ip_progress.js" defer></script>
+  <script src="/static/job_guidance.js" defer></script>
   <link rel="stylesheet" href="/static/vpn.css">
   <script src="/static/browser.js" defer></script>
   <script src="/static/vpn.js" defer></script>
@@ -116,7 +117,7 @@
 
         <section id="job-detail" class="panel detail-panel" hidden aria-labelledby="detail-title">
           <div class="detail-heading"><div class="detail-heading-main"><span class="section-overline">تفاصيل المهمة</span><div class="detail-title-line"><h2 id="detail-title"></h2><span id="detail-status"></span></div><code id="detail-query" class="query-block"></code></div><div id="detail-actions" class="detail-actions"></div></div>
-          <div id="job-alert" class="job-alert notice warning" hidden><svg class="icon"><use href="#i-info"/></svg><div><strong id="job-alert-title"></strong><p id="job-alert-message"></p></div><button id="attention-action" class="button small secondary">متابعة المهمة</button></div>
+          <div id="job-alert" class="job-alert notice warning" hidden><svg class="icon"><use href="#i-info"/></svg><div><strong id="job-alert-title"></strong><p id="job-alert-message"></p><p id="job-checkpoint-status"></p><details id="job-technical-error" hidden><summary>تفاصيل الخطأ التقنية</summary><p id="job-technical-error-text" dir="auto"></p></details></div><button id="attention-action" class="button small secondary">متابعة المهمة</button></div>
           <div class="detail-tabs" role="tablist" aria-label="تفاصيل المهمة"><button id="tab-overview" role="tab" data-tab="overview" aria-selected="true" aria-controls="pane-overview" tabindex="0">نظرة عامة</button><button id="tab-results" role="tab" data-tab="results" aria-selected="false" aria-controls="pane-results" tabindex="-1">العناوين <span id="results-tab-count" class="counter">0</span></button><button id="tab-events" role="tab" data-tab="events" aria-selected="false" aria-controls="pane-events" tabindex="-1">سجل التنفيذ <span id="log-warning-dot" class="notification-dot" hidden></span></button><button id="tab-settings" role="tab" data-tab="settings" aria-selected="false" aria-controls="pane-settings" tabindex="-1">الإعدادات والتنزيل</button></div>
           <div id="pane-overview" class="detail-pane" role="tabpanel" aria-labelledby="tab-overview">
             <section id="job-network" class="vpn-section" aria-labelledby="job-network-title"><h3 id="job-network-title">اتصال المهمة — Job Network</h3><p id="job-network-state"></p><p id="job-network-phase" role="status"></p><p id="job-network-count"></p><p id="job-network-error" class="vpn-error" role="status" hidden></p><div class="vpn-actions"><button id="job-browser-open" class="button small primary">فتح المتصفح التفاعلي</button><button id="job-network-check" class="button small secondary">إعادة اختبار الاتصال</button><button id="job-network-edit" class="button small secondary">اختيار ملف / سياسة</button><button id="job-network-restore" class="button small secondary">اختيار الاتصال السابق</button><button id="job-network-resume" class="button small primary">استكمال</button><button id="job-network-stop" class="button small secondary">إيقاف المهمة</button></div></section>
