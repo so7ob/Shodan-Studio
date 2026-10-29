@@ -44,6 +44,15 @@ def same_facet(url, expected):
     except (ValueError,TypeError):return False
 
 
+def browser_page_failure(state):
+    if state == 'browser_challenge':
+        raise RuntimeError('[BROWSER_CHALLENGE] أكمل اختبار الأمان الظاهر في المتصفح ثم استكمل المهمة.')
+    if state == 'login_required':
+        raise RuntimeError('[BROWSER_LOGIN] لم يكتمل تسجيل الدخول إلى Shodan؛ راجع نموذج الدخول في المتصفح.')
+    if state == 'access_denied':
+        raise RuntimeError('[HTTP_403] رفض Shodan الوصول إلى الصفحة.')
+
+
 class CDP:
     def __init__(self, process, read_fd, write_fd, event):
         self.process,self.read_fd,self.write_fd,self.event=process,read_fd,write_fd,event
@@ -191,14 +200,34 @@ class Session:
         doc=self.document
         current=getattr(self,'page_url','') or doc.get('url','')
         off_task=bool(self.expected and current and not same_facet(current,self.expected))
-        return {'running':True,'backend':getattr(self,'backend','chromium'),'state':'rate_limited' if doc.get('status')==429 else 'browser_challenge' if doc.get('challenge') else 'access_denied' if doc.get('status') in (401,403) else 'off_task_page' if off_task else 'ready' if self.ready else 'awaiting_verification',
+        checked=getattr(self,'_checked_page',None)
+        page_state=checked[2] if checked and checked[0] is doc and checked[1]==current else None
+        return {'running':True,'backend':getattr(self,'backend','chromium'),'state':'rate_limited' if doc.get('status')==429 else 'browser_challenge' if doc.get('challenge') else 'access_denied' if doc.get('status') in (401,403) else page_state or ('off_task_page' if off_task else 'ready' if self.ready else 'awaiting_verification'),
                 'can_return_to_results':off_task,'http_status':doc.get('status'),'host':urlsplit(current).hostname or '', 'width':WIDTH,'height':HEIGHT,
                 'login_status':getattr(self,'login_status',None),
                 'browser_version':getattr(self,'browser_identity',{}).get('product',''),
                 'user_agent':getattr(self,'browser_identity',{}).get('userAgent','')}
 
+    def inspect_page(self, page):
+        from .engine import FacetParseError, parse_facet_html
+        self.ready=False
+        self._checked_page=None
+        self.page_url=page['url']
+        doc=self.document
+        if not self.expected or doc.get('url')!=page['url'] or doc.get('challenge') or doc.get('status')!=200:
+            return self.status()
+        query,facet=facet_url(self.expected)
+        on_task=same_facet(page['url'],self.expected) and same_facet(doc.get('url'),self.expected)
+        try:parse_facet_html(page['html'],facet,query,allow_missing_facet=facet!='ip')
+        except FacetParseError as exc:
+            tag=str(exc).partition(']')[0]
+            state={'[LOGIN':'login_required','[ACCESS':'browser_challenge','[DENIED':'access_denied'}.get(tag)
+            self._checked_page=(doc,page['url'],state or ('invalid_page' if on_task else 'off_task_page'))
+        else:
+            self.ready=on_task
+        return self.status()
+
     def verify(self, return_to_results=False):
-        from .engine import parse_facet_html
         self.ready=False
         page=self.html()
         self.page_url=page['url']
@@ -206,13 +235,7 @@ class Session:
         # exact pending facet selected by the worker; never accept a caller URL.
         if return_to_results and self.expected and not same_facet(page['url'],self.expected):
             return self.navigate(self.expected)
-        result=self.status()
-        if not same_facet(page['url'],self.expected) or not same_facet(self.document.get('url'),self.expected) or self.document.get('challenge') or self.document.get('status')!=200:return result
-        query,facet=facet_url(self.expected)
-        try:parse_facet_html(page['html'],facet,query)
-        except Exception:return result
-        self.ready=True
-        return {**result,'state':'ready'}
+        return self.inspect_page(page)
 
     def fetch(self,url):
         from .engine import http_failure
@@ -231,7 +254,9 @@ class Session:
             return None
         failure=source_failure()
         if failure is not None:return failure
-        if not same_facet(self.expected,url) or self.verify()['state']!='ready':
+        verified=self.verify()
+        browser_page_failure(verified['state'])
+        if not same_facet(self.expected,url) or verified['state']!='ready':
             # Verification reads the DOM while response events can arrive.
             failure=source_failure()
             if failure is not None:return failure
@@ -240,9 +265,11 @@ class Session:
         while time.monotonic()<deadline:
             failure=source_failure()
             if failure is not None:return failure
-            if self.verify()['state']=='ready':return {'html':self.html()['html']}
+            verified=self.verify()
+            browser_page_failure(verified['state'])
+            if verified['state']=='ready':return {'html':self.html()['html']}
             time.sleep(.25)
-        raise RuntimeError('[BROWSER_INPUT] افتح جلسة المتصفح وأكمل التحقق أو تسجيل الدخول يدويًا؛ لم تُستخرج نتائج غير متحققة.')
+        raise RuntimeError('[HTML_PARSE] تعذر قراءة صفحة المرشح المطلوبة؛ لم تظهر صفحة تحقق أو تسجيل دخول. أعد محاولة الطلب.')
 
     def login(self, data):
         from .shodan_login import LOGIN_URL, login_expression
@@ -281,6 +308,11 @@ class Session:
         if op=='verify' and set(data)=={'action','return_to_results'} and data['return_to_results'] is True:
             return self.verify(return_to_results=True)
         if op=='frame' and set(data)=={'action'}:
+            # Read the loaded page automatically; never submit, navigate or resume.
+            if self.expected and self.document.get('status')==200:
+                try:self.verify()
+                except (RuntimeError, ValueError):
+                    self.ready=False;self._checked_page=None
             for attempt in range(3):
                 try:
                     frame=self.call('Page.captureScreenshot',{'format':'jpeg','quality':65,'captureBeyondViewport':False})['data']

@@ -21,6 +21,7 @@ def main():
     parser.add_argument('--source-denial', action='store_true')
     parser.add_argument('--interactive', action='store_true')
     parser.add_argument('--accounts', action='store_true')
+    parser.add_argument('--empty-facet', action='store_true')
     parser.add_argument('--automatic-browser', action='store_true')
     parser.add_argument('--adaptive', action='store_true')
     parser.add_argument('--pacing', action='store_true')
@@ -49,7 +50,7 @@ def main():
                            'last_partition':{'facet':'port','children':2,'raw_children':52,'estimated_requests':2},
                            'request_wait':{'reason':'request_delay','until':time.time()+180}})
                 store.update_job(job['id'],status='running')
-        if args.interactive or args.accounts:
+        if args.interactive or args.accounts or args.empty_facet:
             state={'running':True,'backend':'patchright' if args.automatic_browser else 'chromium',
                    'state':'off_task_page','can_return_to_results':True,'http_status':200,'width':1100,'height':760}
             image='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII='
@@ -61,6 +62,8 @@ def main():
                 if data['action']=='verify':
                     if data.get('return_to_results') is True:state.update(state='awaiting_verification',can_return_to_results=False,http_status=200)
                     elif not state['can_return_to_results']:state.update(state='ready',http_status=200)
+                if args.empty_facet and data['action']=='frame' and not state['can_return_to_results']:
+                    state.update(state='ready',login_status='submitted')
                 if data['action']=='stop':return {'running':False,'state':'closed'}
                 return {**state,**({'image':image} if data['action']=='frame' else {})}
             manager._browser_rpc=browser_rpc

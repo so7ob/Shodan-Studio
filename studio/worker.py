@@ -179,8 +179,11 @@ class StudioCrawler(engine.Crawler):
             return result['html']
         except RuntimeError as exc:
             match=re.match(r'\[HTTP_(\d{3})\]',str(exc))
+            kind = ('browser_challenge' if '[BROWSER_CHALLENGE]' in str(exc) else
+                    'auth' if str(exc).startswith('[BROWSER_LOGIN]') else
+                    'response' if str(exc).startswith('[HTML_PARSE]') else 'browser_session')
             raise engine.SpiderError(str(exc),http_status=int(match[1]) if match else None,
-                                     failure_kind='browser_challenge' if '[BROWSER_CHALLENGE]' in str(exc) else 'browser_session') from None
+                                     failure_kind=kind) from None
 
     def saved_config(self):
         return {**super().saved_config(), "studio_demo": self.demo_data is not None,

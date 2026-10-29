@@ -64,6 +64,16 @@ test('technical markup stays a literal string for textContent rendering', () => 
   assert.equal(viewModel({ error }).technicalError, error);
   assert.doesNotMatch(viewModel({ error }).message, /<img/);
 });
+test('layout errors never ask the user to solve a security challenge', () => {
+  const vm = viewModel({ status:'waiting_input', input_reason:'source_error', error:'[HTML_PARSE] unrecognized facet' });
+  assert.equal(vm.kind,'response_error');
+  assert.doesNotMatch(vm.message,/تحقق|تسجيل الدخول|اختبار أمان/);
+});
+test('login and permission guidance are distinct from a detected challenge', () => {
+  assert.match(viewModel({error:'[BROWSER_LOGIN] login form'}).title,/تسجيل الدخول/);
+  assert.match(viewModel({error:'[BROWSER_CHALLENGE] detected'}).message,/اختبار أمان/);
+  assert.doesNotMatch(viewModel({error:'[HTTP_403] denied'}).message,/تحقق|اختبار أمان/);
+});
 test('view model does not mutate saved state or require browser/network globals', () => {
   const input = Object.freeze({ ...job, stats: Object.freeze({ wait_until: now / 1000 + 1 }) });
   assert.equal(viewModel(input, now, format).kind, 'waiting');
