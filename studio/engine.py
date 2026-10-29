@@ -241,10 +241,15 @@ def parse_facet_html(html: str, facet: str, query: str | None = None, *,
     if re.search(r"\b(log[ -]?in|sign[ -]?in)\b", titles) or any(
             n.tag == "input" and n.attrs.get("type", "").lower() == "password" for n in nodes):
         raise FacetParseError("[LOGIN] A login page was returned instead of facet results.")
-    lower_html = html.lower()
-    if any(x in titles for x in ("just a moment", "attention required", "access denied", "captcha")) or any(
-            x in lower_html for x in ("cf-chl-", 'id="challenge-form"', "id='challenge-form'")):
-        raise FacetParseError("[ACCESS] Browser verification or access denial was returned instead of results.")
+    challenge_markup = any(n.attrs.get('id','').lower().startswith('cf-chl-') or
+                           n.attrs.get('id','').lower() == 'challenge-form' or
+                           'cf-turnstile' in n.classes() or
+                           (n.tag == 'iframe' and re.match(r'https://challenges\.cloudflare\.com(?::443)?(?:/|$)',n.attrs.get('src',''),re.I))
+                           for n in nodes)
+    if any(x in titles for x in ("just a moment", "attention required", "captcha")) or challenge_markup:
+        raise FacetParseError("[ACCESS] Browser verification was returned instead of results.")
+    if "access denied" in titles:
+        raise FacetParseError("[DENIED] Access was denied instead of returning facet results.")
     warnings: list[str] = []
     selected_facets = []
     facet_forms = []
@@ -348,6 +353,18 @@ def parse_facet_html(html: str, facet: str, query: str | None = None, *,
         if node.tag in ("p", "h1", "h2", "h3", "h4", "h5", "h6"))
     recognizable = bool(cards or selected_facets or "facet analysis" in titles)
     explicit_empty = (total == 0 or (total is None and empty_message)) and not rows and recognizable and not rejected
+    # Shodan omits the result card and TOTAL when a field has no buckets.
+    # That says nothing about other fields or the number of matching hosts.
+    no_information = any(re.fullmatch(r"no information available\.?", " ".join(n.text().split()), re.I)
+                         for n in nodes if n.tag in ("p", "div", "section"))
+    facet_heading = any("facet analysis" in n.text().lower() for n in nodes
+                        if n.tag in ("title", "h1", "h2", "h3", "h4"))
+    identified_form = selected_facets and any(
+        n.tag == "input" and n.attrs.get("name") == "query" for form in facet_forms for n in form.walk())
+    if no_information and facet_heading and identified_form and not rows and not pairs and not rejected:
+        if total != 0:
+            warnings.append("No buckets for this field; this does not establish an empty query.")
+        return FacetPage(facet, [], total, list(dict.fromkeys(warnings)), total == 0)
     if (allow_missing_facet and facet in SUPPORTED_FACETS - {"ip"}
             and total is not None and total > 0 and selected_facets and cards
             and not rows and not pairs and not rejected and not empty_message

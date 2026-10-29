@@ -14,8 +14,8 @@ import struct
 import subprocess
 import sys
 
-from .browser_session import Session, allowed_url, facet_url, same_facet, LIMIT, KEYS
-from .engine import parse_facet_html, parse_retry_after, http_failure
+from .browser_session import Session, allowed_url, facet_url, same_facet, browser_page_failure, LIMIT, KEYS
+from .engine import parse_retry_after, http_failure
 from email.message import Message
 
 
@@ -127,14 +127,8 @@ class PatchrightSession:
         self.page_url = page['url']
         if return_to_results and self.expected and not same_facet(page['url'], self.expected):
             return await self.navigate(self.expected)
-        result = await self.status_result()
-        if (not same_facet(page['url'], self.expected) or not same_facet(self.document.get('url'), self.expected)
-                or self.document.get('challenge') or self.document.get('status') != 200): return result
-        query, facet = facet_url(self.expected)
-        try: parse_facet_html(page['html'], facet, query)
-        except (ValueError, RuntimeError): return result
-        self.ready = True
-        return {**result, 'state': 'ready'}
+        Session.inspect_page(self, page)
+        return await self.status_result()
 
     def source_failure(self):
         doc = self.document
@@ -150,7 +144,9 @@ class PatchrightSession:
         facet_url(url)
         failure = self.source_failure()
         if failure is not None: return failure
-        if not same_facet(self.expected, url) or (await self.verify())['state'] != 'ready':
+        verified = await self.verify()
+        browser_page_failure(verified['state'])
+        if not same_facet(self.expected, url) or verified['state'] != 'ready':
             failure = self.source_failure()
             if failure is not None: return failure
             await self.navigate(url)
@@ -158,10 +154,12 @@ class PatchrightSession:
         while asyncio.get_running_loop().time() < deadline:
             failure = self.source_failure()
             if failure is not None: return failure
-            if (await self.verify())['state'] == 'ready':
+            verified = await self.verify()
+            browser_page_failure(verified['state'])
+            if verified['state'] == 'ready':
                 return {'html': (await self.html())['html'], 'user_agent': self.user_agent, 'backend': self.backend}
             await asyncio.sleep(.25)
-        raise RuntimeError('[BROWSER_INPUT] أكمل التحقق أو تسجيل الدخول يدويًا ثم افحص الصفحة.')
+        raise RuntimeError('[HTML_PARSE] تعذر قراءة صفحة المرشح المطلوبة؛ لم تظهر صفحة تحقق أو تسجيل دخول. أعد محاولة الطلب.')
 
     async def login(self, data):
         from .shodan_login import LOGIN_URL, LOGIN_FUNCTION, login_payload
@@ -188,6 +186,8 @@ class PatchrightSession:
                 set(data) == {'action', 'return_to_results'} and data['return_to_results'] is True):
             return await self.verify(data.get('return_to_results', False))
         if op == 'frame' and set(data) == {'action'}:
+            if self.expected and self.document.get('status') == 200:
+                await self.verify()
             frame = await self.page.screenshot(type='jpeg', quality=65, timeout=12000)
             encoded = base64.b64encode(frame).decode()
             if len(encoded) > 800000: raise RuntimeError('Browser frame exceeds limit.')

@@ -2,9 +2,9 @@
 window.ShodanBrowser = (() => {
   const $ = id => document.getElementById(id);
   let ctx, job, activeJob, timer, busy=false, inputBusy=false, opening=false, queue=Promise.resolve(), generation=0, lastResult={};
-  const states={opening:'جارٍ فتح متصفح التحقق…',failed:'تعذّر فتح المتصفح؛ راجع سجل المهمة.',closed:'الجلسة مغلقة',awaiting_verification:'أكمل التحقق أو تسجيل الدخول، ثم افحص الصفحة.',browser_challenge:'لم يسمح Shodan بالوصول بعد. المهمة متوقفة ونتائجها محفوظة. فحص الصفحة لا يحل تحقق Cloudflare، وتكرار فتح الجلسة لا يضمن قبوله. يلزم ظهور نتائج صالحة قبل الاستكمال.',rate_limited:'قيّد Shodan عدد الطلبات (429). انتظر موعد الاستكمال المحفوظ؛ لا حاجة إلى تكرار الضغط على التحقق.',access_denied:'رفض Shodan الوصول. راجع الصفحة.',ready:'تم التحقق من صفحة نتائج صالحة؛ يمكنك الاستكمال.'};
+  const states={opening:'جارٍ فتح متصفح المهمة…',failed:'تعذّر فتح المتصفح؛ راجع سجل المهمة.',closed:'الجلسة مغلقة',awaiting_verification:'جارٍ انتظار تحميل صفحة المهمة.',browser_challenge:'ظهر اختبار أمان في Shodan. أكمله داخل المتصفح؛ تبقى نتائج المهمة محفوظة.',login_required:'لم يكتمل تسجيل الدخول إلى Shodan. راجع نموذج الدخول ثم عد إلى نتائج المهمة.',invalid_page:'تعذر قراءة تنسيق صفحة المرشح. أعد محاولة الطلب أو راجع سجل المهمة.',rate_limited:'قيّد Shodan عدد الطلبات (429). انتظر موعد الاستكمال المحفوظ؛ لا حاجة إلى تكرار الضغط على التحقق.',access_denied:'رفض Shodan الوصول. راجع صلاحيات الحساب.',ready:'صفحة المرشح جاهزة؛ يمكنك الاستكمال.'};
   async function send(input) {return ctx.api(`/api/jobs/${activeJob}/browser`,{method:'POST',body:JSON.stringify(input)});}
-  states.off_task_page='الصفحة الحالية ليست نتائج المهمة. بعد إتمام تسجيل الدخول اضغط «العودة إلى نتائج المهمة»، ثم «فحص الصفحة».';
+  states.off_task_page='بعد إتمام تسجيل الدخول اضغط «العودة إلى نتائج المهمة». تُفحص الصفحة تلقائيًا عند تحميلها.';
   states.reconnected='فُتحت جلسة المتصفح تلقائيًا بعد تبديل VPN؛ تُحترم مهلة انتظار المصدر.';
   function controls() {
     $('browser-resume').disabled=inputBusy||opening||lastResult.state!=='ready';
@@ -15,8 +15,8 @@ window.ShodanBrowser = (() => {
   function show(result) {
     lastResult=result;
     $('browser-status').textContent=(states[result.state]||'جارٍ التحقق')+(result.http_status ? ` · HTTP ${result.http_status}`:'');
-    const loginLabels={submitted:'أُرسلت بيانات الدخول. أكمل أي تحقق مطلوب، ثم عد إلى نتائج المهمة وافحص الصفحة.',verification_required:'أكمل التحقق المطلوب داخل المتصفح ثم حاول تسجيل الدخول.',not_login_page:'صفحة تسجيل الدخول غير ظاهرة؛ قد تكون الجلسة مسجلة بالفعل. عد إلى نتائج المهمة وافحص الصفحة.',unsafe_form:'لم تُرسل بيانات الدخول لأن نموذج الصفحة غير معتمد.'};
-    $('browser-login-status').textContent=loginLabels[result.login_status]||'';
+    const loginLabels={submitted:'أُرسلت بيانات الدخول. بعد قبولها عد إلى نتائج المهمة؛ تُفحص الصفحة تلقائيًا.',verification_required:'راجع نموذج الدخول وأكمل الحقول أو التحقق المطلوب ثم حاول تسجيل الدخول.',not_login_page:'صفحة تسجيل الدخول غير ظاهرة؛ قد تكون الجلسة مسجلة بالفعل. عد إلى نتائج المهمة.',unsafe_form:'لم تُرسل بيانات الدخول لأن نموذج الصفحة غير معتمد.'};
+    $('browser-login-status').textContent=result.state==='ready'?'':loginLabels[result.login_status]||'';
     controls();
     if(result.image)$('browser-frame').src=result.image;
   }

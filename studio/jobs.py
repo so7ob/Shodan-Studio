@@ -301,7 +301,15 @@ class JobManager:
                     if mode != 'html' and self._browser_job == job_id: raise JobValidationError('أغلق جلسة المتصفح قبل تغيير مصدر المهمة.')
                     if mode == 'html':
                         verified = self._browser_rpc(job_id, {'action':'verify'})
-                        if verified.get('state') != 'ready': raise JobValidationError('أكمل التحقق من صفحة Shodan داخل المتصفح ثم افحص الصفحة قبل الاستكمال.')
+                        if verified.get('state') != 'ready':
+                            messages = {
+                                'browser_challenge':'أكمل اختبار الأمان الظاهر في متصفح Shodan قبل الاستكمال.',
+                                'login_required':'لم يكتمل تسجيل الدخول إلى Shodan؛ سجّل الدخول بالحساب ثم عد إلى نتائج المهمة.',
+                                'off_task_page':'عد إلى نتائج المهمة داخل المتصفح قبل الاستكمال.',
+                                'invalid_page':'تعذر قراءة صفحة المرشح؛ أعد محاولة الطلب أو راجع سجل المهمة.',
+                                'rate_limited':'قيّد Shodan الطلبات؛ انتظر موعد الاستكمال المحفوظ.',
+                                'access_denied':'رفض Shodan الوصول؛ راجع صلاحيات الحساب.'}
+                            raise JobValidationError(messages.get(verified.get('state'),'انتظر اكتمال تحميل صفحة المهمة في Shodan قبل الاستكمال.'))
                 if key and (key in job["query"] or key in job["title"] or key in job["settings"]["user_agent"]):
                     raise JobValidationError("المفتاح موجود في حقل نصي للمهمة؛ استخدم مهمة جديدة دون تضمين المفتاح.")
                 if mode == "api" and not key and not job["settings"]["demo"]:
@@ -444,7 +452,7 @@ class JobManager:
             raise RuntimeError('تعذر تسجيل الدخول إلى Shodan؛ راجع صفحة المتصفح ثم حاول مجددًا.') from None
         # Never forward raw credential-operation responses to a client or log.
         safe = {}
-        enums = {'backend':('chromium','patchright'), 'state':('rate_limited','browser_challenge','access_denied','off_task_page','ready','awaiting_verification'),
+        enums = {'backend':('chromium','patchright'), 'state':('rate_limited','browser_challenge','login_required','invalid_page','access_denied','off_task_page','ready','awaiting_verification'),
                  'login_status':('submitted','verification_required','not_login_page','unsafe_form')}
         for key, values in enums.items():
             if result.get(key) in values:safe[key]=result[key]

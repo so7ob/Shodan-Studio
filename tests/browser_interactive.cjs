@@ -17,7 +17,7 @@ const {AxeBuilder}=require('@axe-core/playwright');
   await page.locator('#browser-text').fill('fixture-private-text');await page.locator('#browser-text-form button').click();assert.equal((await input).postDataJSON().text,'fixture-private-text');
   assert.equal(await page.locator('#browser-text').inputValue(),'');
   await page.locator('[data-browser-key="Tab"]').click();
-  await page.locator('#browser-verify').click();await page.locator('#browser-status').filter({hasText:'الصفحة الحالية ليست نتائج المهمة'}).waitFor();
+  await page.locator('#browser-verify').click();await page.locator('#browser-status').filter({hasText:'العودة إلى نتائج المهمة'}).waitFor();
   assert.equal(await page.locator('#browser-resume').isDisabled(),true);
   await page.waitForFunction(()=>!document.querySelector('#browser-return').disabled);
   const returning=page.waitForRequest(r=>r.url().endsWith('/browser')&&r.postDataJSON().return_to_results===true);
@@ -25,7 +25,7 @@ const {AxeBuilder}=require('@axe-core/playwright');
   assert.deepEqual((await returning).postDataJSON(),{action:'verify',return_to_results:true});
   await page.waitForFunction(()=>document.querySelector('#browser-return').disabled);
   assert.equal(await page.locator('#browser-resume').isDisabled(),true);
-  await page.locator('#browser-verify').click();await page.locator('#browser-status').filter({hasText:'صفحة نتائج صالحة'}).waitFor();
+  await page.locator('#browser-verify').click();await page.locator('#browser-status').filter({hasText:'صفحة المرشح جاهزة'}).waitFor();
   await page.waitForTimeout(2200);assert.equal(await page.locator('#browser-resume').isEnabled(),true);
   for(const width of [1280,375]){
    await page.setViewportSize({width,height:1000});

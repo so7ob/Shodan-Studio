@@ -1,0 +1,45 @@
+{
+  "synthetic": true,
+  "live_account_login": false,
+  "deployed": false,
+  "python_tests": 308,
+  "javascript_tests": 24,
+  "runtime": {
+    "passed": true,
+    "live_shodan_requests": false,
+    "intercepted_documents": {
+      "chromium": 4,
+      "patchright": 4
+    },
+    "empty_ready_without_click": true,
+    "next_facet_continued": true,
+    "login_and_challenge_preserved": true
+  },
+  "ui": {
+    "synthetic": true,
+    "liveShodanRequests": false,
+    "automaticReady": true,
+    "verifyClicks": 0,
+    "separateBarrierMessages": true,
+    "rtlWidths": [
+      375,
+      1280
+    ],
+    "axeViolations": 0,
+    "pageErrors": []
+  },
+  "worker": {
+    "empty_facet_continued": true,
+    "extracted_ips": 160,
+    "requests": 5,
+    "input_required_events": 0
+  },
+  "preserved": [
+    "query/facet identity",
+    "unknown query total for missing fields",
+    "request budgets",
+    "Retry-After",
+    "account isolation",
+    "checkpoint schema"
+  ]
+}
