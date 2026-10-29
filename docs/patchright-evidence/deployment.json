@@ -1,0 +1,31 @@
+{
+  "source_sha": "ea7ca4b5abe1b1379e09725b9b240290835aadeb",
+  "version": "1.6.0",
+  "health": {
+    "ok": true,
+    "version": "1.6.0"
+  },
+  "release": "/opt/shodan-studio/releases/release-lkHdv22h",
+  "previous_release": "/opt/shodan-studio/releases/release-MfF1wRp2",
+  "backup": "/var/backups/shodan-studio/pre-1.6.0-20261029T153302Z",
+  "backup_restore_verified": true,
+  "services_active": true,
+  "existing_jobs_preserved": true,
+  "original_job_status": "cancelled",
+  "original_job_ips": 566,
+  "final_health": {
+    "ok": true,
+    "version": "1.6.0"
+  },
+  "application_sha256": "2f8410f7ae9373ed73c4eedcc92b38240a4fc9610583c2cf7f3131e27ff32229",
+  "live_acceptance": true,
+  "test_job_id": "8d336ce1ee780b73e455a135280fdd9a",
+  "test_job_status": "paused",
+  "test_extraction_requests": 1,
+  "test_extracted_ips": 3,
+  "archive_restore": {
+    "regular_files_restored_and_verified": 1543,
+    "link_entries_archived": 0,
+    "restored_archive_database_matches_snapshot": true
+  }
+}

@@ -19,7 +19,7 @@ DEFAULT_SETTINGS = {
     "api_fallback": "html", "rate_limit_retries": 3,
     "retry_base_delay": 30.0, "max_retry_wait": 600.0,
     "on_rate_limit": "pause", "user_agent": "", "rotate_user_agents": False,
-    "include_non_global": False, "demo": False,
+    "include_non_global": False, "demo": False, "browser_recovery": "manual",
 }
 
 
@@ -68,6 +68,7 @@ def settings_from(payload: Any, *, allow_demo=False) -> dict:
         "transport": ("curl", "python"), "ip_version": ("4", "6", "all"),
         "strategy": ("adaptive", "priority", "tree"), "api_fallback": ("html", "stop"),
         "on_rate_limit": ("pause", "stop"),
+        "browser_recovery": ("manual", "on_challenge"),
     }
     for field, options in choices.items():
         if result[field] not in options:
@@ -127,4 +128,7 @@ def validate_job(payload: Any, *, allow_demo=False) -> tuple[dict, str | None]:
     if key and (key in query or key in title or key in settings["user_agent"]):
         raise JobValidationError("ضع مفتاح API في حقل المفتاح فقط.")
     from .vpn_config import policy
-    return {"title": title, "query": query, "mode": mode, "settings": settings, "priority": priority, **policy(payload.get("network"))}, key
+    network = policy(payload.get("network"))
+    if "browser_recovery" not in (payload.get("settings") or {}) and mode == "html" and network["network_mode"] != "direct" and not settings["demo"]:
+        settings["browser_recovery"] = "on_challenge"
+    return {"title": title, "query": query, "mode": mode, "settings": settings, "priority": priority, **network}, key

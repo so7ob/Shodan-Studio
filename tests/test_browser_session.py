@@ -293,7 +293,7 @@ class BrowserWorkerTests(unittest.TestCase):
             if len(calls)==3:raise RuntimeError('[HTTP_403] [BROWSER_CHALLENGE] fixture')
             return {'html':data.fetch(fields['url'])}
         with patch('studio.vpn_client.rpc',side_effect=fetch):code,events=self.run_capture()
-        self.assertEqual(code,75);saved=self.checkpoint();self.assertEqual(events[-1]['input_reason'],'source_error')
+        self.assertEqual(code,75);saved=self.checkpoint();self.assertEqual(events[-1]['input_reason'],'browser_challenge')
         first_calls=list(calls);resumed=[]
         def resume(op,**fields):resumed.append(fields['url']);return {'html':data.fetch(fields['url'])}
         with patch('studio.vpn_client.rpc',side_effect=resume):code,events=self.run_capture()

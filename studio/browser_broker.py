@@ -15,6 +15,13 @@ from .vpn_config import profile_id
 
 ROOT = Path('/var/lib/shodan-studio-browser')
 MAX_REPLY = 12 * 1024 * 1024
+PATCHRIGHT_RUNTIME = Path('/opt/shodan-studio/browser-runtime')
+
+
+def browser_backend():
+    value = os.environ.get('SHODAN_STUDIO_BROWSER_BACKEND', 'chromium')
+    if value not in ('chromium', 'patchright'): raise RuntimeError('Invalid server browser backend.')
+    return value
 
 class BrowserPipeError(RuntimeError): pass
 
@@ -35,10 +42,12 @@ class BrowserBroker:
     def __init__(self,broker):
         self.broker=broker;self.process=None;self.job=None;self.profile=None
         self.last_used=0;self.buffer=b'';self.state='closed'
+        self.backend=browser_backend()
+        self.identity={}
 
     def status(self):
         alive=bool(self.process and self.process.poll() is None)
-        return dict(running=alive,job_id=self.job if alive else None,profile_id=self.profile if alive else None,state=self.state if alive else 'closed')
+        return dict(running=alive,job_id=self.job if alive else None,profile_id=self.profile if alive else None,state=self.state if alive else 'closed',backend=self.backend)
 
     def close(self):
         proc=self.process
@@ -69,6 +78,7 @@ class BrowserBroker:
         response=json.loads(raw)
         if not response.get('ok'):raise RuntimeError(response.get('error','Browser operation failed.'))
         result=response['result'];self.state=result.get('state',self.state)
+        if result.get('user_agent'): self.identity={'user_agent':result['user_agent'],'backend':self.backend}
         return result
 
     def request(self,data):
@@ -88,11 +98,20 @@ class BrowserBroker:
             return self.request({'action':'frame'})
         account=pwd.getpwnam('shodan-browser')
         if account.pw_uid in (0,self.broker.uid):raise RuntimeError('Browser needs a separate unprivileged account.')
-        if not Path('/usr/lib/chromium/chromium').is_file() or not Path('/usr/bin/Xvfb').is_file():raise RuntimeError('Install the optional Chromium/Xvfb browser dependencies.')
+        python = '/usr/bin/python3'; module = 'studio.browser_session'
+        env = dict(ENV)
+        if self.backend == 'patchright':
+            python = str(PATCHRIGHT_RUNTIME / 'venv/bin/python3'); module = 'studio.patchright_session'
+            if not Path(python).is_file() or not (PATCHRIGHT_RUNTIME / 'browsers').is_dir():
+                raise RuntimeError('[BROWSER_DEPENDENCY] Install the pinned Patchright runtime with tools/install_browser.sh --patchright.')
+            env['PLAYWRIGHT_BROWSERS_PATH'] = str(PATCHRIGHT_RUNTIME / 'browsers')
+        elif not Path('/usr/lib/chromium/chromium').is_file():
+            raise RuntimeError('Install the optional Chromium browser dependency.')
+        if not Path('/usr/bin/Xvfb').is_file():raise RuntimeError('Install the optional Xvfb browser dependency.')
         if shutil.disk_usage(ROOT).free<200*1024*1024:raise RuntimeError('Browser requires at least 200 MiB free disk space.')
         if not self.broker.launch_check().get('healthy'):raise RuntimeError('تحقق من اتصال VPN قبل فتح المتصفح.')
         self.profile=profile_id(self.broker.active)
-        folder=ROOT/self.profile
+        folder=ROOT/(self.profile + ('-patchright' if self.backend == 'patchright' else ''))
         if folder.is_symlink():raise ValueError('Invalid browser profile directory.')
         folder.mkdir(mode=0o700,exist_ok=True);os.chown(folder,account.pw_uid,account.pw_gid);folder.chmod(0o700)
         # Additional browser-only egress guard. Browser pages cannot reach host,
@@ -101,9 +120,9 @@ class BrowserBroker:
         command([IP,'netns','exec',NS,NFT,'delete','table','inet','studio_browser'],check=False)
         command([IP,'netns','exec',NS,NFT,'-f','-'],data=browser_guard(account.pw_uid))
         argv=[IP,'netns','exec',NS,SETPRIV,'--reuid',str(account.pw_uid),'--regid',str(account.pw_gid),'--clear-groups','--no-new-privs','--bounding-set=-all',
-              '/usr/bin/python3','-s','-m','studio.browser_session',str(folder)]
+              python,'-s','-m',module,str(folder)]
         self.process=subprocess.Popen(argv,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,
-                                     cwd=self.broker.code,env=ENV,start_new_session=True)
+                                     cwd=self.broker.code,env=env,start_new_session=True)
         self.job=job_id;self.buffer=b'';self.last_used=time.monotonic()
         try:
             self.reply()
@@ -129,4 +148,8 @@ class BrowserBroker:
     def fetch(self,job_id,url):
         profile_id(job_id);facet_url(url)
         if job_id!=self.job or self.broker.running_job!=job_id or self.profile!=self.broker.active:raise RuntimeError('[BROWSER_SESSION] Browser worker lease does not match.')
-        return self.request({'action':'fetch','url':url})
+        isolation=self.broker._isolation()
+        if not isolation['route_verified'] or not isolation['leak_protection']:
+            self.close();raise RuntimeError('[BROWSER_SESSION] Browser tunnel isolation was lost.')
+        result = self.request({'action':'fetch','url':url})
+        return {**self.identity, **result} if 'html' in result else result

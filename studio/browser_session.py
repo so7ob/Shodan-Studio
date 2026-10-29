@@ -134,7 +134,7 @@ class Session:
                 proc=subprocess.Popen(['/usr/bin/python3','-s','-m','studio.browser_session','launch',str(cr),str(rw),str(self.folder/'profile')],pass_fds=(cr,rw),env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
             finally:os.close(cr);os.close(rw)
             self.cdp=CDP(proc,rr,cw,self.event)
-            self.cdp.send('Browser.getVersion',timeout=15)
+            self.browser_identity=self.cdp.send('Browser.getVersion',timeout=15)
             targets=self.cdp.send('Target.getTargets')['targetInfos']
             self.target=next(t['targetId'] for t in targets if t['type']=='page')
             self.session=self.cdp.send('Target.attachToTarget',{'targetId':self.target,'flatten':True})['sessionId']
@@ -164,7 +164,7 @@ class Session:
             self.ready=False
             r=p['response'];headers={k.lower():v for k,v in r.get('headers',{}).items()}
             delay=parse_retry_after(headers.get('retry-after'))
-            self.document={'url':r.get('url',''),'status':int(r['status']),'challenge':headers.get('cf-mitigated')=='challenge','frame':p.get('frameId'),
+            self.document={'url':r.get('url',''),'status':int(r['status']),'challenge':headers.get('cf-mitigated','').lower()=='challenge','frame':p.get('frameId'),
                            'retry_after':'unbounded' if delay is not None and not math.isfinite(delay) else delay}
             self.page_url=r.get('url','')
         elif method=='Network.requestWillBeSent' and p.get('type')=='Document' and event.get('sessionId')==self.session and p.get('frameId')==getattr(self,'main_frame',None):
@@ -189,8 +189,10 @@ class Session:
         doc=self.document
         current=getattr(self,'page_url','') or doc.get('url','')
         off_task=bool(self.expected and current and not same_facet(current,self.expected))
-        return {'running':True,'state':'browser_challenge' if doc.get('challenge') else 'rate_limited' if doc.get('status')==429 else 'access_denied' if doc.get('status') in (401,403) else 'off_task_page' if off_task else 'ready' if self.ready else 'awaiting_verification',
-                'can_return_to_results':off_task,'http_status':doc.get('status'),'host':urlsplit(current).hostname or '', 'width':WIDTH,'height':HEIGHT}
+        return {'running':True,'backend':getattr(self,'backend','chromium'),'state':'rate_limited' if doc.get('status')==429 else 'browser_challenge' if doc.get('challenge') else 'access_denied' if doc.get('status') in (401,403) else 'off_task_page' if off_task else 'ready' if self.ready else 'awaiting_verification',
+                'can_return_to_results':off_task,'http_status':doc.get('status'),'host':urlsplit(current).hostname or '', 'width':WIDTH,'height':HEIGHT,
+                'browser_version':getattr(self,'browser_identity',{}).get('product',''),
+                'user_agent':getattr(self,'browser_identity',{}).get('userAgent','')}
 
     def verify(self, return_to_results=False):
         from .engine import parse_facet_html

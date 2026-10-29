@@ -1,0 +1,14 @@
+{
+  "job_id": "8d336ce1ee780b73e455a135280fdd9a",
+  "separate_test_job": true,
+  "source_request_limit": 1,
+  "extraction_requests": 0,
+  "original_before": {
+    "status": "cancelled",
+    "ips": 566
+  },
+  "error": "RuntimeError: Manual VPN health check failed.",
+  "live_acceptance": false,
+  "original_preserved": true,
+  "final_status": "paused"
+}

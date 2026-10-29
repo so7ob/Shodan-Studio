@@ -191,7 +191,7 @@ class AdaptiveWorkerTests(unittest.TestCase):
             return {'html':data.fetch(fields['url'])}
         with patch('studio.vpn_client.rpc',side_effect=fetch):code,events=self.run_capture()
         self.assertEqual(code,75);self.assertEqual(events[-1]['stats']['unique_ips'],100)
-        self.assertEqual(events[-1]['input_reason'],'source_error')
+        self.assertEqual(events[-1]['input_reason'],'browser_challenge')
         completed=set(calls[:2]);resumed=[]
         def again(op,**fields):resumed.append(fields['url']);return {'html':data.fetch(fields['url'])}
         with patch('studio.vpn_client.rpc',side_effect=again):code,events=self.run_capture()

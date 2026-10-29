@@ -298,6 +298,9 @@ class StudioApp:
             return self.json_response({"profile": self.manager.vpn_update(vpn_match[1], payload)})
         network_match = re.fullmatch(r"/api/jobs/([a-f0-9]{32})/network", path)
         browser_match = re.fullmatch(r"/api/jobs/([a-f0-9]{32})/browser", path)
+        browser_policy_match = re.fullmatch(r"/api/jobs/([a-f0-9]{32})/browser-policy", path)
+        if browser_policy_match and method == 'POST':
+            return self.json_response({'job': self.manager.browser_policy(browser_policy_match[1], payload)})
         if browser_match and method == 'POST':
             return self.json_response(self.manager.browser_action(browser_match[1],payload))
         if network_match and method == "POST":

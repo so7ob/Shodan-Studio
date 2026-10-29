@@ -87,6 +87,8 @@ class Store:
         self.path.chmod(0o600)
         from .vpn_schema import migrate
         migrate(self.path)
+        from .browser_recovery import migrate as migrate_browser_recovery
+        migrate_browser_recovery(self)
         if self.setup_required():
             self._ensure_setup_token()
 

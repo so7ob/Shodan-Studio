@@ -409,3 +409,9 @@ python3 -m unittest discover -s tests -v
 - [مرجع Shodan API](https://developer.shodan.io/api).
 - [شرح Shodan لتحليل Facets](https://book.shodan.io/websites/www/facet-analysis/).
 
+
+## Optional Patchright recovery (1.6.0)
+
+VPN-backed HTML tasks can open a browser once when a Cloudflare challenge is
+detected, then wait for manual verification and resume. Installation, policy,
+migration and rollback are documented in [Patchright recovery](docs/PATCHRIGHT_RECOVERY.md).

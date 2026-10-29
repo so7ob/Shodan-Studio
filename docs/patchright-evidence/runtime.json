@@ -1,0 +1,9 @@
+{
+  "patchright": "1.64.3",
+  "pyee": "13.0.0",
+  "greenlet": "3.5.6",
+  "typing_extensions": "4.15.0",
+  "chromium": "156.0.8078.4",
+  "chromium_revision": "1248",
+  "runtime_root_owned": true
+}

@@ -148,6 +148,9 @@ class JobManager:
         with self.store.connection() as con:
             jobs = [json.loads(row[0]) for row in con.execute("SELECT document FROM jobs")]
         for job in jobs:
+            if job.get('browser_recovery_attempt', {}).get('state') == 'opening':
+                self.store.update_job(job['id'], browser_recovery_attempt={**job['browser_recovery_attempt'],
+                    'state': 'failed', 'error': 'توقف الخادم أثناء فتح المتصفح؛ راجع الجلسة يدويًا.'})
             if job.get("network_mode", "direct") != "direct" and job["status"] not in FINAL:
                 self.store.update_job(job["id"], network_health="unknown", current_egress_ip=None, network_phase="checking_network")
             # Also reconcile finished jobs: an older release may have written
@@ -329,6 +332,7 @@ class JobManager:
                         self._active_id = None
                         if self._browser_job == job['id']:
                             self._browser_deadline = time.monotonic() + 1800
+                    self._auto_browser_recovery(job['id'])
                     if self._browser_job == job['id'] and self._get(job['id'])['status'] in FINAL - {'failed'}:
                         with contextlib.suppress(Exception): self.browser_action(job['id'], {'action':'stop'})
                     continue
@@ -377,6 +381,65 @@ class JobManager:
         from .vpn_client import rpc
         return rpc('browser', job_id=job_id, input=payload)
 
+    def browser_policy(self, job_id, payload):
+        if not isinstance(payload, dict) or set(payload) != {'browser_recovery'} or payload['browser_recovery'] not in ('manual', 'on_challenge'):
+            raise JobValidationError('اختر سياسة استرداد المتصفح المدعومة.')
+        with self._lock:
+            job = self._get(job_id)
+            if job['status'] not in RESUMABLE or self._active_id or self._network_operation or self._browser_job == job_id:
+                raise JobValidationError('أوقف المهمة وأغلق جلسة المتصفح قبل تغيير السياسة.')
+            self.store.update_job(job_id, settings={**job['settings'], **payload})
+            return self.get_job(job_id)
+
+    def _auto_browser_recovery(self, job_id):
+        from .browser_recovery import eligible, reserve
+        current = self._get(job_id)
+        if current.get('input_reason') != 'browser_challenge' or not eligible(current): return
+        def operation():
+            job = self._get(job_id)
+            if (self._stop.is_set() or job['status'] != 'waiting_input' or job.get('input_reason') != 'browser_challenge'
+                    or not eligible(job) or job['settings'].get('browser_recovery') != 'on_challenge'):
+                return
+            # Repeated challenges in a browser retain the same session and VPN lease.
+            if self._browser_job:
+                return
+            attempt = reserve(self.store, job, self._path(job_id))
+            if attempt is None: return
+            self.store.append_event(job_id, {'kind': 'browser_recovery', 'state': 'opening',
+                'message': 'جارٍ فتح متصفح التحقق؛ التقدم محفوظ والاستكمال يدوي.'})
+            deadline = time.monotonic() + job['settings']['delay']
+            while time.monotonic() < deadline:
+                if self._stop.wait(min(.25, deadline - time.monotonic())) or self._get(job_id)['status'] != 'waiting_input':
+                    raise RuntimeError('أُلغي فتح المتصفح؛ المهمة متوقفة.')
+            self._open_browser(self._get(job_id))
+        try:
+            self._vpn_mutation(operation)
+        except (RuntimeError, ValueError, OSError, engine.SpiderError, engine.CheckpointError) as exc:
+            job = self._get(job_id)
+            attempt = {**job.get('browser_recovery_attempt', {}), 'challenge_id': job.get('browser_challenge_id'),
+                       'state': 'failed', 'error': self._redact(str(exc))[:1000]}
+            self.store.update_job(job_id, browser_recovery_attempt=attempt)
+            self.store.append_event(job_id, {'kind': 'browser_recovery', 'state': 'failed',
+                                          'level': 'warning', 'message': attempt['error']})
+
+    def _open_browser(self, job):
+        from .browser_recovery import pending_url
+        job_id = job['id']
+        if job['status'] not in RESUMABLE or job['mode'] != 'html' or job.get('network_mode', 'direct') == 'direct':
+            raise RuntimeError('اختر مهمة HTML متوقفة وملف VPN معزولًا.')
+        if not self._browser_job:
+            # An existing browser task is pinned to its selected tunnel by VPNManager.
+            prepared = self.vpn.prepare(job)
+            self.store.update_job(job_id, **prepared)
+        if self._get(job_id)['status'] not in RESUMABLE or self._stop.is_set():
+            raise RuntimeError('أُلغي فتح المتصفح؛ المهمة متوقفة.')
+        result = self._browser_rpc(job_id, {'action': 'start', 'url': pending_url(job, self._path(job_id))})
+        self._browser_job = job_id; self._browser_deadline = time.monotonic() + 1800
+        attempt = {**job.get('browser_recovery_attempt', {}), 'state': result.get('state', 'awaiting_verification')}
+        self.store.update_job(job_id, browser_session_enabled=True, browser_recovery_attempt=attempt,
+                              browser_backend=result.get('backend', 'chromium'))
+        return result
+
     def browser_action(self, job_id, payload):
         if not isinstance(payload,dict) or payload.get('action') not in {'start','stop','frame','click','key','text','scroll','verify'}:
             raise ValueError('طلب المتصفح غير صالح.')
@@ -388,15 +451,11 @@ class JobManager:
             if action=='start':
                 if set(payload)!={'action'}:raise ValueError('طلب بدء المتصفح غير صالح.')
                 if job['mode']!='html' or job.get('network_mode','direct')=='direct':raise RuntimeError('اختر HTML وملف VPN معزولًا لهذه المهمة أولًا.')
-                if not self._browser_job:
-                    prepared=self.vpn.prepare(job)
-                    self.store.update_job(job_id,**prepared)
-                from .engine import build_url
-                result=self._browser_rpc(job_id,{'action':'start','url':build_url(job['query'],'ip')})
-                self._browser_job=job_id
-                self.store.update_job(job_id,browser_session_enabled=True)
+                result=self._open_browser(job)
             else:
                 result=self._browser_rpc(job_id,payload)
+                self.store.update_job(job_id, browser_recovery_attempt={**job.get('browser_recovery_attempt', {}),
+                    'state':result.get('state','awaiting_verification')}, browser_backend=result.get('backend',job.get('browser_backend','chromium')))
                 if action=='stop':
                     self._browser_job=None
             if action!='frame':self._browser_deadline=time.monotonic()+1800
@@ -527,6 +586,9 @@ class JobManager:
                         changes["network_phase"] = "completed" if state.startswith("completed") else "connection_lost" if event.get("input_reason") == "network_error" else state
                         changes.update(status=state, error=event.get("error"), input_reason=event.get("input_reason"),
                                        finished_at=utc_now() if state in FINAL else None)
+                        if event.get('input_reason') == 'browser_challenge':
+                            changes['browser_challenge_id'] = secrets.token_hex(16)
+                            changes['browser_recovery_attempt'] = {**current.get('browser_recovery_attempt', {}), 'state': 'browser_challenge'}
                     if changes:
                         updated = self.store.record_ip_progress(job_id,
                             inputs=event.pop("ip_progress_inputs", None), **changes)

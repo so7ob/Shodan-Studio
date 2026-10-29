@@ -64,6 +64,9 @@ def build_args(job_dir: Path, job: dict, key: str | None):
     args.studio_browser_job = job['id'] if job.get('browser_session_enabled') else None
     if args.studio_browser_job and (job['mode'] != 'html' or job.get('network_mode','direct') == 'direct'):
         raise engine.SpiderError('[BROWSER_SESSION] Browser extraction requires HTML and an isolated VPN.')
+    if args.studio_browser_job:
+        args.rotate_user_agents = False
+        args.user_agent = None
     # Checkpoints are data, never authority to choose a filesystem destination.
     if args.output is None or args.output.absolute() != job_dir / "result.txt" or args.report_path.absolute() != job_dir / "result.txt.report.json" or args.format != "txt":
         raise engine.SpiderError("[JOB_PATH] مسار نتائج نقطة الاستكمال لا يطابق مجلد المهمة.")
@@ -162,6 +165,9 @@ class StudioCrawler(engine.Crawler):
         from .vpn_client import rpc
         try:
             result=rpc('browser_fetch',job_id=self.args.studio_browser_job,url=url)
+            if self.report.get('pages'):
+                self.report['pages'][-1].update(user_agent=result.get('user_agent', 'native browser'),
+                    browser_backend=result.get('backend', 'browser'), transport='browser')
             if result.get('http_status')==429:
                 delay=result.get('retry_after')
                 if delay=='unbounded':delay=float('inf')
@@ -170,7 +176,8 @@ class StudioCrawler(engine.Crawler):
             return result['html']
         except RuntimeError as exc:
             match=re.match(r'\[HTTP_(\d{3})\]',str(exc))
-            raise engine.SpiderError(str(exc),http_status=int(match[1]) if match else None,failure_kind='browser_session') from None
+            raise engine.SpiderError(str(exc),http_status=int(match[1]) if match else None,
+                                     failure_kind='browser_challenge' if '[BROWSER_CHALLENGE]' in str(exc) else 'browser_session') from None
 
     def saved_config(self):
         return {**super().saved_config(), "studio_demo": self.demo_data is not None,
@@ -346,7 +353,7 @@ def _run_worker_locked(job_dir: Path, payload: dict) -> int:
                     crawler.switch_source("html", "automatic API fallback: " + engine.safe_detail(exc))
                     continue
                 if recoverable or str(exc).startswith("[REQUEST_LIMIT]"):
-                    crawler.input_reason = "source_error" if recoverable else "request_budget"
+                    crawler.input_reason = "browser_challenge" if getattr(exc, 'failure_kind', None) == 'browser_challenge' else "source_error" if recoverable else "request_budget"
                     emit("input_required", level="warning", message=engine.safe_detail(exc),
                          detail={"reason": crawler.input_reason, "choices": ["resume", "change_source", "new_key", "cancel"]})
                     raise engine.PauseRequested(engine.safe_detail(exc)) from None
