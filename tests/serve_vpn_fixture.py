@@ -37,7 +37,8 @@ def main():
                        'last_partition':{'facet':'port','children':2,'estimated_requests':2}})
             store.update_job(job['id'],status='completed')
         if args.interactive:
-            state={'running':True,'state':'off_task_page','can_return_to_results':True,'http_status':200,'width':1100,'height':760}
+            state={'running':True,'backend':'patchright' if args.automatic_browser else 'chromium',
+                   'state':'off_task_page','can_return_to_results':True,'http_status':200,'width':1100,'height':760}
             image='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII='
             def browser_rpc(job_id,data):
                 if data['action']=='verify':

@@ -136,3 +136,16 @@ prove live Shodan acceptance. A deployment receipt records the production check
 separately. The originally selected task became cancelled during implementation;
 the user selected a separate test job and the original task's 566 IPs must remain
 unchanged.
+
+Production deployment: source commit `ea7ca4b5abe1b1379e09725b9b240290835aadeb`,
+version 1.6.0, active application/helper, matching live health, verified backup
+and preserved original job IP sets. The approved separate test job
+`8d336ce1ee780b73e455a135280fdd9a` received HTTP 200 in Patchright, passed exact
+facet verification, extracted 3 IPs in one worker request and was left paused.
+Its browser was closed. The original task remains cancelled with 566 IPs.
+
+Live preflight recorded a missing manually selected tunnel, a test-directory
+ownership error (corrected before retry as the application user), and a transient
+VPN health hold. These held runs sent zero extraction requests. The final run
+passed the unchanged health checks. Receipts retain each observation separately.
+GitHub CI 40902906990 passed on the deployed implementation commit.

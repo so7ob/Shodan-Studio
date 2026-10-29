@@ -25,6 +25,7 @@ const {AxeBuilder}=require('@axe-core/playwright');
   await page.waitForFunction(()=>document.querySelector('#browser-return').disabled);
   await page.locator('#browser-verify').click();
   await page.waitForFunction(()=>!document.querySelector('#browser-resume').disabled);
+  await page.locator('#job-browser-state').filter({hasText:'patchright'}).waitFor();
   for(const width of [1280,375]){
    await page.setViewportSize({width,height:1000});
    assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
