@@ -324,6 +324,17 @@ class StudioApp:
             return self.json_response({"job": self.manager.create_job(payload)}, 201)
         if path == "/api/checkpoints/import" and method == "POST":
             return self.json_response({"job": self.manager.import_checkpoint(payload)}, 201)
+        request_match = re.fullmatch(r'/api/jobs/([a-f0-9]{32})/requests(?:/([a-f0-9]{32}))?',path)
+        if request_match:
+            if method not in {'GET','HEAD'}: raise HTTPError(405,'طريقة الطلب غير مدعومة.','method_not_allowed')
+            job_id,request_id=request_match.groups()
+            if self.manager.get_job(job_id) is None: raise KeyError(job_id)
+            params=parse_qs(env.get('QUERY_STRING',''),keep_blank_values=True,max_num_fields=20)
+            if request_id:
+                return self.json_response(self.store.requests.detail(job_id,request_id,
+                    offset=self.query_int(params,'offset',0),limit=self.query_int(params,'limit',100,1,1000)))
+            return self.json_response(self.store.requests.list(job_id,
+                before=self.query_int(params,'before',0),limit=self.query_int(params,'limit',50,1,200)))
         match = re.fullmatch(r"/api/jobs/([^/]+)(?:/(actions|events|results|download))?", path)
         if not match or not JOB_ID.fullmatch(match[1]):
             raise HTTPError(404, "المسار غير موجود.", "not_found")
@@ -387,6 +398,8 @@ class StudioApp:
             "/static/vpn.js": ("vpn.js", "text/javascript; charset=utf-8"),
             "/static/browser.js": ("browser.js", "text/javascript; charset=utf-8"),
             "/static/accounts.js": ("accounts.js", "text/javascript; charset=utf-8"),
+            "/static/requests.js": ("requests.js", "text/javascript; charset=utf-8"),
+            "/static/requests.css": ("requests.css", "text/css; charset=utf-8"),
             "/static/vpn.css": ("vpn.css", "text/css; charset=utf-8"),
             "/favicon.svg": ("favicon.svg", "image/svg+xml"),
         }

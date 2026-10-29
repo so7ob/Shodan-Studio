@@ -1,5 +1,19 @@
 # Shodan Studio: IP progress adaptation
 
+Issue #31 adds request history within the existing Arabic RTL dashboard. A compact
+current/latest request card sits beside progress and pacing; the execution log
+defaults to expandable request rows with a separate all-events view. Keep current
+fonts, tokens and controls. Render queries LTR and facet labels as text, distinguish
+service records from unique IPs, and label missing historic data explicitly. Polls
+update existing rows without collapsing details, replacing focused controls or
+resetting the user's scroll position. Load older attempts and facet values only
+on demand; announce errors without announcing every background update.
+
+Issue #31 verification: the authenticated fixture passed 375/1280 RTL, keyboard
+focus, expanded-state retention, 100-value pagination, reload and axe (zero
+violations). Screenshots and machine-readable evidence are under
+`docs/request-history-evidence/`; no manual screen-reader audit was performed.
+
 The existing Arabic RTL operations dashboard is the design reference. This is a
 focused metric change, preserving its buildless HTML/JS structure. The interface
 should remain dark, precise, compact and legible: “clear collection status”.

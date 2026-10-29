@@ -173,3 +173,36 @@ then `node tests/browser_pacing_progress.cjs` with Playwright/axe available and
 `STUDIO_TEST_CHROMIUM` pointing to the test Chromium binary. The fixture uses a
 temporary database and sends no Shodan queries. This records local validation,
 not a deployment or live source acceptance result.
+
+## Query attempts and results — Issue #31, 2026-10-30
+
+The local full Python gate passed 325 tests in 175.294 seconds. The 14 request
+history tests also passed after final API-page detail and HTML verification-state
+adjustments. All 31 Node tests passed; JavaScript syntax, installer/helper/browser
+checks and diff checks passed. Exact-head CI runs the full gate again before merge.
+
+Coverage includes HTML/API pagination, distinct empty/unavailable/verification
+states, parse/connection failures, 429 retry identities, pacing-excluded durations,
+cache observations without additional source calls, actual SQLite IP additions,
+replay safety, interrupted results and restart recovery. Large-detail tests stream
+10,000 facet values in bounded messages, including an oversized source label.
+Authenticated routes reject anonymous and cross-job detail access. Secret fields
+and raw responses are excluded. Existing worker/lifecycle tests retain pause,
+resume and cancellation checks.
+
+An isolated copy of the live SQLite database recovered 270 legacy attempts and
+177 explicitly labelled checkpoint snapshots across 12 jobs, with 4,996 values.
+Repeating the import created no duplicates; job documents remained identical and
+SQLite integrity passed. The live database was not modified and no Shodan query
+was sent. Evidence: `docs/request-history-evidence/offline-migration.json`.
+
+The authenticated local browser fixture exercised 70 attempts, 250 values loaded
+in 100-item pages, an in-flight result completing during polling, old-attempt
+pagination, all-events switching, reload and unsafe markup displayed as text.
+Expanded details and keyboard focus survived refreshes. RTL at 375/1280, overflow
+checks and axe passed with zero page errors. Manual screen-reader testing was not
+performed. Evidence: `docs/request-history-evidence/browser.json` and screenshots.
+Reproduce with `python3 tests/serve_vpn_fixture.py --request-history --port 8801`
+and `node tests/browser_requests.cjs` with Playwright/axe and Chromium available.
+These are fixture and offline migration checks; rollout evidence is recorded
+separately after backup, deployment and live service/API verification.

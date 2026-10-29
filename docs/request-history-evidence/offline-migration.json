@@ -1,0 +1,14 @@
+{
+  "source": "read-only production SQLite backup into temporary directory",
+  "jobs": 12,
+  "history": {
+    "legacy": 270,
+    "snapshot": 177
+  },
+  "facet_values": 4996,
+  "idempotent": true,
+  "job_documents_unchanged": true,
+  "integrity": "ok",
+  "shodan_requests": 0,
+  "live_database_modified": false
+}

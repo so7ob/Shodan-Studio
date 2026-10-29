@@ -38,6 +38,7 @@ class FacetPage:
     total: int | None
     warnings: list[str]
     explicit_empty: bool
+    request_entry: dict | None = field(default=None, repr=False, compare=False)
 
 
 @dataclass
@@ -390,6 +391,7 @@ to the crawler, including refusing a server wait that exceeds its budget.
 import math
 import re
 import time
+import uuid
 from datetime import timezone
 from email.message import Message
 from email.parser import BytesHeaderParser
@@ -2204,6 +2206,7 @@ class Crawler:
         self.session_number = 1
         self.checkpoint_written = args.resume_payload is not None
         self.last_finished: float | None = None
+        self._request_clocks = {}
         self.cache: dict[tuple[str, str], FacetPage] = {}
         self.cache_sources: dict[tuple[str, str], str] = {}
         self.source_changes: list[dict[str, Any]] = []
@@ -2496,6 +2499,32 @@ class Crawler:
         """Presentation hook; retain the injected sleeper and retry semantics."""
         self.sleeper(duration)
 
+    def on_request(self, entry: dict, rows=None) -> None:
+        """Optional structured observation; never controls transport or retries."""
+
+    def request_observed(self, entry, *, status=None, page=None, rows=None):
+        if status: entry['status'] = status
+        if page is not None:
+            page.request_entry = entry
+            rows = [{'value':r.value,'label':r.label,'count':r.count} for r in page.rows]
+            entry.update(total_records=page.total,row_count=len(page.rows))
+            if entry['status'] == 'parsed' and not page.rows:
+                entry['result_status'] = 'empty' if page.explicit_empty else 'unavailable'
+        if entry.get('status') not in ('requesting','received','processing'):
+            if not entry.get('finished_at'):
+                entry['finished_at'] = utc_now()
+                started = self._request_clocks.pop(entry['request_id'],None)
+                if started is not None: entry['duration_ms'] = round(max(0,self.clock()-started)*1000,3)
+        self.on_request(entry,rows)
+
+    def observe_cached(self, query, facet, page):
+        # Each cache consultation is separate from its original network attempt.
+        copied = FacetPage(page.facet,page.rows,page.total,page.warnings,page.explicit_empty)
+        entry={'request_id':uuid.uuid4().hex,'query':query,'facet':facet,'source':self.cache_sources.get((query,facet),self.args.mode),
+               'status':'cached','origin':'cache','session_number':self.session_number,'started_at':utc_now()}
+        self.request_observed(entry,page=copied)
+        return copied
+
     def _request_with_rate_limits(self, operation: Callable[[], Any], template: dict[str, Any],
                                   label: str, counter: str | None = None) -> tuple[Any, dict[str, Any]]:
         """Preserve request scope through automatic retries and explicit pauses."""
@@ -2538,7 +2567,8 @@ class Crawler:
             effective_agent = self.current_user_agent or (API_DEFAULT_USER_AGENT if self.args.mode == "api" else USER_AGENT)
             self.pending_request = dict(template)
             entry = {**template, "source": self.args.mode, "number": self.report["requests_attempted"] + 1,
-                     "retry_number": retry_number, "user_agent": effective_agent, "status": "requesting"}
+                     "retry_number": retry_number, "user_agent": effective_agent, "status": "requesting",
+                     "request_id":uuid.uuid4().hex}
             self.report["pages"].append(entry)
             self.report["requests_attempted"] += 1
             if counter:
@@ -2547,11 +2577,15 @@ class Crawler:
             self.progress(f"[{entry['number']}/{self.args.max_requests}] {label}{retry_label} | {safe_detail(entry['query'])}")
             if self.args.debug:
                 self.progress("    User-Agent: " + safe_detail(effective_agent))
+            entry.update(session_number=self.session_number,started_at=utc_now())
+            self._request_clocks[entry['request_id']] = self.clock()
+            self.request_observed(entry)
             failure = None
             try:
                 result = operation()
             except KeyboardInterrupt:
                 entry.update(status="interrupted", error="KeyboardInterrupt")
+                self.request_observed(entry)
                 raise
             except (SpiderError, ShodanAPIError, OSError) as exc:
                 failure = exc
@@ -2560,12 +2594,16 @@ class Crawler:
                 self.last_finished = self.clock()
             if failure is None:
                 entry["status"] = "received"
+                self.request_observed(entry)
                 self.pending_request = None
                 self.wait_unbounded = False
                 return result, entry
             if isinstance(failure, ShodanAPIError):
                 failure = SpiderError(safe_detail(failure), http_status=failure.http_status,
                                       retry_after=failure.retry_after, failure_kind=failure.failure_kind)
+            entry['http_status'] = getattr(failure,'http_status',None)
+            if entry['http_status'] == 429: entry['status'] = 'rate_limited'
+            self.request_observed(entry)
             if getattr(failure, "http_status", None) != 429:
                 self.checkpoint("failed")
                 raise failure
@@ -2653,7 +2691,7 @@ class Crawler:
         key = (query, facet)
         if self.cached_page_available(query, facet):
             self.report["cache_hits"] += 1
-            return self.cache[key]
+            return self.observe_cached(query,facet,self.cache[key])
         url = build_url(query, facet)
         html, entry = self._request_with_rate_limits(lambda: self.fetcher(url),
                     {"query": query, "facet": facet, "url": url}, facet.upper())
@@ -2664,12 +2702,15 @@ class Crawler:
                                     (self.args.strategy == "priority" and facet in SPLIT_FACETS))
         except FacetParseError as exc:
             entry.update(status="failed", error=safe_detail(exc))
+            self.request_observed(entry)
             raise SpiderError(f"[HTML_PARSE] {safe_detail(exc)}") from None
         except (SpiderError, OSError, KeyboardInterrupt) as exc:
             entry.update(status="interrupted" if isinstance(exc, KeyboardInterrupt) else "failed", error=safe_detail(exc) or "KeyboardInterrupt")
+            self.request_observed(entry)
             raise
         entry["status"] = "parsed"
         self.inspect_coverage(page, entry, expected)
+        self.request_observed(entry,page=page)
         self.cache[key] = page
         self.cache_sources[key] = "html"
         self.checkpoint("running")
@@ -2683,12 +2724,16 @@ class Crawler:
             return None
 
     def collect_ips(self, page: FacetPage) -> None:
+        before = len(self.accepted)
         self.report["visited"]["ip_leaves"] += 1
         for row in page.rows:
             address = parse_ip(row.value)
             if address is None:
                 continue  # The parser normally already rejects invalid IP rows.
             self.accept_ip(address)
+        if page.request_entry:
+            page.request_entry['new_unique_ips'] = len(self.accepted)-before
+            self.request_observed(page.request_entry)
         self.progress(f"    Unique IPs collected: {len(self.accepted)}")
 
     def accept_ip(self, address: IP) -> None:
@@ -2719,18 +2764,20 @@ class Crawler:
         except (ShodanAPIError, SpiderError, OSError) as exc:
             message = safe_detail(exc)
             entry.update(status="failed", error=message)
+            self.request_observed(entry)
             raise SpiderError(message, http_status=getattr(exc, "http_status", None),
                               retry_after=getattr(exc, "retry_after", None),
                               failure_kind=getattr(exc, "failure_kind", None)) from None
         except KeyboardInterrupt:
             entry.update(status="interrupted", error="KeyboardInterrupt")
+            self.request_observed(entry)
             raise
 
     def read_api_page(self, query: str, facet: str, expected: int | None = None) -> FacetPage:
         cache_key = (query, facet)
         if self.cached_page_available(query, facet):
             self.report["cache_hits"] += 1
-            return self.cache[cache_key]
+            return self.observe_cached(query,facet,self.cache[cache_key])
         if facet == "ip":
             page = self.read_ip_pages(query, expected)
         else:
@@ -2740,8 +2787,10 @@ class Crawler:
                 page = parse_api_facet(payload, facet)
                 entry.update(status="parsed", api_total=page.total)
                 self.inspect_coverage(page, entry, expected, limit=self.args.api_facet_limit)
+                self.request_observed(entry,page=page)
             except SpiderError as exc:
                 entry.update(status="failed", error=safe_detail(exc))
+                self.request_observed(entry)
                 raise
         self.cache[cache_key] = page
         self.cache_sources[cache_key] = "api"
@@ -2767,6 +2816,7 @@ class Crawler:
                 payload, entry = self.request_api("/shodan/host/search", {
                     "query": query, "page": number, "minify": "true"}, "ip")
                 try:
+                    before = len(self.accepted)
                     total = api_integer(payload.get("total"), "total")
                     records = payload.get("matches")
                     if not isinstance(records, list) or len(records) > 100:
@@ -2789,6 +2839,7 @@ class Crawler:
                     summary["records_received"] = received
                     invalid = 0
                     repeated_ids = 0
+                    page_counts = {}
                     for row in records:
                         value = row.get("ip_str")
                         address = parse_ip(value) if isinstance(value, str) else None
@@ -2798,6 +2849,7 @@ class Crawler:
                         self.accept_ip(address)  # Preserve each page immediately for --save-partial.
                         text = str(address)
                         counts[text] = counts.get(text, 0) + 1
+                        page_counts[text] = page_counts.get(text, 0) + 1
                         metadata = row.get("_shodan")
                         identity = metadata.get("id") if isinstance(metadata, dict) else None
                         if isinstance(identity, str) and identity:
@@ -2810,9 +2862,14 @@ class Crawler:
                     if len(records) < 100 and number < target_pages:
                         self.warning("API_SHORT_PAGE", f"Page {number} returned {len(records)} records before the planned last page; continuing with the next page.", query, "ip")
                     entry["unique_ips_collected_so_far"] = len(self.accepted)
+                    entry['new_unique_ips'] = len(self.accepted)-before
+                    entry['rows'] = [{'value':ip,'label':ip,'count':count} for ip,count in page_counts.items()]
+                    if total==0 and not records: entry['result_status']='empty'
+                    self.request_observed(entry,status='parsed',rows=entry['rows'])
                     self.progress(f"    API records received in leaf: {received}; unique IPs collected: {len(self.accepted)}")
                 except SpiderError as exc:
                     entry.update(status="failed", error=safe_detail(exc))
+                    self.request_observed(entry)
                     raise
                 number += 1
                 self.api_progress[query] = {"counts": dict(counts), "first_total": first_total,
