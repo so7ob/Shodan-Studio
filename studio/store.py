@@ -21,7 +21,7 @@ def utc_now() -> str:
 
 def _json(value: Any) -> str:
     """Do not accidentally persist credentials in job documents or events."""
-    forbidden = {"api_key", "api_key_resolved", "authorization", "cookie", "password", "setup_token"}
+    forbidden = {"api_key", "api_key_resolved", "authorization", "cookie", "password", "setup_token", "privatekey", "presharedkey", "private_key", "preshared_key", "headerprotectionkey"}
     def visit(item: Any, depth: int = 0) -> None:
         if depth > 40:
             raise ValueError("بيانات متداخلة أكثر من الحد المسموح.")
@@ -85,6 +85,8 @@ class Store:
                 );
             """)
         self.path.chmod(0o600)
+        from .vpn_schema import migrate
+        migrate(self.path)
         if self.setup_required():
             self._ensure_setup_token()
 
@@ -241,11 +243,12 @@ class Store:
             con.commit()
         return job
 
-    def claim_next(self) -> dict[str, Any] | None:
+    def claim_next(self, job_id=None) -> dict[str, Any] | None:
         with self.connection() as con:
             con.execute("BEGIN IMMEDIATE")
             rows = con.execute("SELECT id,document FROM jobs WHERE status='queued' ORDER BY priority DESC,created_at").fetchall()
             for row in rows:
+                if job_id is not None and row['id'] != job_id: continue
                 job = json.loads(row["document"])
                 scheduled = job.get("scheduled_at")
                 if scheduled and str(scheduled) > utc_now():

@@ -1,0 +1,12 @@
+{
+  "provider": "simulated",
+  "manualInput": true,
+  "textCleared": true,
+  "verifiedResume": true,
+  "rtlWidths": [
+    375,
+    1280
+  ],
+  "axeViolations": 0,
+  "errors": []
+}

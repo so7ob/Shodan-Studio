@@ -16,6 +16,7 @@ import urllib.parse
 from . import engine
 from .config import settings_from, validate_key
 from .ip_progress import crawler_progress_inputs
+from .vpn_config import network_error
 
 
 def atomic_text(path: Path, content: str) -> None:
@@ -36,7 +37,7 @@ def emit(kind: str, **fields) -> None:
 
 def build_args(job_dir: Path, job: dict, key: str | None):
     """Construct a fixed CLI argument vector; shell syntax is never evaluated."""
-    cfg = settings_from(job["settings"], allow_demo=True)
+    cfg = settings_from({"strategy": "priority", **job["settings"]}, allow_demo=True)
     checkpoint = job_dir / "checkpoint.json"
     argv = ["--mode", job["mode"], "--save-partial", "--on-source-error", "pause"]
     if checkpoint.exists():
@@ -60,6 +61,9 @@ def build_args(job_dir: Path, job: dict, key: str | None):
     # Explicit mode keeps an inherited environment key from choosing the source.
     os.environ.pop("SHODAN_API_KEY", None)
     args = engine.parse_args(argv)
+    args.studio_browser_job = job['id'] if job.get('browser_session_enabled') else None
+    if args.studio_browser_job and (job['mode'] != 'html' or job.get('network_mode','direct') == 'direct'):
+        raise engine.SpiderError('[BROWSER_SESSION] Browser extraction requires HTML and an isolated VPN.')
     # Checkpoints are data, never authority to choose a filesystem destination.
     if args.output is None or args.output.absolute() != job_dir / "result.txt" or args.report_path.absolute() != job_dir / "result.txt.report.json" or args.format != "txt":
         raise engine.SpiderError("[JOB_PATH] مسار نتائج نقطة الاستكمال لا يطابق مجلد المهمة.")
@@ -89,27 +93,22 @@ class DemoData:
         self.country = next((v[0] for _, _, v, neg in fields.get("country", []) if not neg and len(v) == 1), "EG")
 
     def values(self, query: str, facet: str):
+        from collections import Counter
         fields = engine.scope_filters(query)
-        def chosen(name):
-            return next((v[0].casefold() for _, _, v, neg in fields.get(name, []) if not neg and len(v) == 1), "")
-        city, asn, port = chosen("city"), chosen("asn"), chosen("port")
-        if facet == "country":
-            return [(self.country, 292)], 292
-        if facet == "city":
-            return [("Cairo", 194), ("Giza", 98)], 292
-        if facet == "asn" and city == "cairo":
-            return [("AS8452", 140), ("AS24863", 54)], 194
-        if facet == "port" and asn == "as8452":
-            return [("443", 51), ("8080", 49), ("80", 40)], 140
-        if facet == "ip":
-            offset, count = ((0, 98) if city == "giza" else (98, 54) if asn == "as24863" else
-                             (152, 51) if port == "443" else (203, 49) if port == "8080" else (252, 40))
-            result = []
-            for number in range(offset, offset + count):
-                address = (f"192.0.2.{number + 1}" if number < 254 else f"198.51.100.{number - 253}")
-                result.append((address, 1))
-            return result, count
-        return [], 0
+        records = []
+        for number in range(292):
+            address = f"192.0.2.{number + 1}" if number < 254 else f"198.51.100.{number - 253}"
+            city = 'Giza' if number < 98 else 'Cairo'
+            asn = 'AS36992' if number < 98 else 'AS24863' if number < 152 else 'AS8452'
+            port = '80' if number < 98 or number >= 252 else '443' if number < 203 else '8080'
+            record = dict(ip=address,country=self.country,city=city,asn=asn,port=port,
+                          version='1.0',product='Fixture',org='Fixture',os='Fixture')
+            if all((record[field].casefold() not in {v.casefold() for v in values}) if negative
+                   else (record[field].casefold() in {v.casefold() for v in values})
+                   for field,entries in fields.items() for _,_,values,negative in entries):
+                records.append(record)
+        counts = Counter(record[facet] for record in records)
+        return sorted(counts.items(),key=lambda row:(-row[1],row[0])),len(records)
 
     def fetch(self, url: str) -> str:
         params = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)
@@ -117,7 +116,7 @@ class DemoData:
         rows, total = self.values(query, facet)
         # Match the real parser's facet table with links retaining the query.
         body = [f'<html><head><title>Shodan demo facet</title></head><body><h2>Total: {total}</h2><table class="facet-table">']
-        for value, count in rows:
+        for value, count in rows[:engine.FACET_LIMIT]:
             child = engine.narrow_query(query, facet, value) if facet != "ip" else query + ' ip:"' + value + '"'
             href = "/search?" + urllib.parse.urlencode({"query": child})
             body.append(f'<tr><td><a href="{html.escape(href, quote=True)}">{html.escape(value)}</a></td><td>{count}</td></tr>')
@@ -147,7 +146,7 @@ class StudioCrawler(engine.Crawler):
         self._finalizing = False
         self._initializing = True
         self._current_query = args.effective_query
-        super().__init__(args, fetcher=self.demo_data.fetch if demo else None,
+        super().__init__(args, fetcher=self.demo_data.fetch if demo else self.browser_fetch if getattr(args,'studio_browser_job',None) else None,
                          sleeper=self.interruptible_sleep, continue_prompt=self.needs_input)
         if args.mode == "api":
             self.configure_source("api")
@@ -157,6 +156,21 @@ class StudioCrawler(engine.Crawler):
 
     def configure_source(self, mode, client=None):
         return super().configure_source(mode, client=self.demo_data if mode == "api" and self.demo_data else client)
+
+    def browser_fetch(self, url):
+        import re
+        from .vpn_client import rpc
+        try:
+            result=rpc('browser_fetch',job_id=self.args.studio_browser_job,url=url)
+            if result.get('http_status')==429:
+                delay=result.get('retry_after')
+                if delay=='unbounded':delay=float('inf')
+                elif type(delay) not in (int,float) or delay<0:delay=None
+                raise engine.SpiderError(str(engine.http_failure(429)),http_status=429,retry_after=delay)
+            return result['html']
+        except RuntimeError as exc:
+            match=re.match(r'\[HTTP_(\d{3})\]',str(exc))
+            raise engine.SpiderError(str(exc),http_status=int(match[1]) if match else None,failure_kind='browser_session') from None
 
     def saved_config(self):
         return {**super().saved_config(), "studio_demo": self.demo_data is not None,
@@ -209,7 +223,7 @@ class StudioCrawler(engine.Crawler):
         done = int(plan.get("completed_leaves", 0)) if known else 0
         total = len(branches) if known else None
         phase = self.report.get("planning_stage", "discovering")
-        if self.not_before_utc and self.not_before_utc > time.time():
+        if self.wait_unbounded or (self.not_before_utc and self.not_before_utc > time.time()):
             phase = "waiting"
         return {
             "phase": phase, "unique_ips": len(self.accepted), "filtered_ips": len(self.candidates)-len(self.accepted),
@@ -220,8 +234,11 @@ class StudioCrawler(engine.Crawler):
             "plan_known": known, "percent": round(100*done/total, 1) if total else (100 if known and self.report.get("traversal_completed") else None),
             "current_query": self._current_query, "source": self.args.mode,
             "warnings": len(self.report["warnings"]), "wait_until": self.not_before_utc,
+            "wait_unbounded": self.wait_unbounded,
             "cache_hits": self.report.get("cache_hits", 0), "visited": self.report.get("visited", {}),
             "session_number": self.session_number, "demo": self.demo_data is not None,
+            "planning_strategy": self.args.strategy, "facet_probes": plan.get("facet_probes", 0) if known else 0,
+            "last_partition": plan.get("last_decision") if known else None,
             "traversal_completed": self.report.get("traversal_completed", False),
         }
 
@@ -255,6 +272,28 @@ class StudioCrawler(engine.Crawler):
         super().checkpoint(status)
         self.snapshot(force=True)
 
+    def _request_with_rate_limits(self, operation, template, label, counter=None):
+        # Retry at the existing request boundary so every attempt is budgeted,
+        # recorded, and cannot mark a failed page complete.
+        for attempt in range(3):
+            try:
+                result = super()._request_with_rate_limits(operation, template, label, counter)
+                if attempt:
+                    emit('network', phase='resuming_extraction', message='استعاد الطلب الاتصال.', error=None)
+                return result
+            except (engine.SpiderError, engine.ShodanAPIError, OSError) as exc:
+                category = network_error(exc)
+                if not category: raise
+                detail = engine.safe_detail(exc)
+                emit('network', phase='connection_lost', error=detail, message=detail)
+                self.checkpoint('network_retry')
+                if attempt == 2:
+                    self.input_reason = 'network_error'
+                    raise engine.PauseRequested(detail) from None
+                emit('network', phase='retry_scheduled', error=detail,
+                     message=f'إعادة محاولة الاتصال بعد {2 ** attempt} ثانية.')
+                self.interruptible_sleep(2 ** attempt)
+
     def read_page(self, query, facet, expected=None):
         self.check_control()
         self._current_query = query
@@ -267,6 +306,14 @@ class StudioCrawler(engine.Crawler):
 
 def run_worker(job_dir: Path, payload: dict) -> int:
     os.umask(0o077)
+    # Acquire ownership before reading resume state or regenerating live output.
+    # A duplicate launch must not truncate another worker's progress, and a
+    # resume must read the checkpoint protected by this same lock.
+    with engine.CheckpointLock(job_dir / "checkpoint.json"):
+        return _run_worker_locked(job_dir, payload)
+
+
+def _run_worker_locked(job_dir: Path, payload: dict) -> int:
     job, key = payload["job"], validate_key(payload.get("api_key"))
     if key:
         engine._REGISTERED_SECRETS.add(key)
@@ -279,48 +326,55 @@ def run_worker(job_dir: Path, payload: dict) -> int:
     signal.signal(signal.SIGINT, stop_signal)
     automatic_fallback_used = False
     state, error = "failed", None
-    with engine.CheckpointLock(args.checkpoint):
-        crawler.checkpoint("starting")
-        emit("state", status="running", message="بدأ عامل التنفيذ.")
-        try:
-            while True:
-                crawler.check_control()
-                try:
-                    report = crawler.run()
-                    state = "completed_warnings" if report["warnings"] else "completed"
-                    break
-                except (engine.SpiderError, engine.ShodanAPIError, OSError) as exc:
-                    if isinstance(exc, engine.PauseRequested):
-                        raise
-                    recoverable = engine.recoverable_source_error(exc)
-                    access_failure = getattr(exc, "http_status", None) in (401, 402, 403) or getattr(exc, "failure_kind", None) in ("auth", "permission", "quota")
-                    if recoverable and args.mode == "api" and args.api_fallback == "html" and access_failure and not automatic_fallback_used and crawler.report["requests_attempted"] < args.max_requests:
-                        automatic_fallback_used = True
-                        emit("warning", level="warning", message="تعذر الوصول عبر API؛ محاولة HTML مع حفظ النطاق والتقدم. " + engine.safe_detail(exc))
-                        crawler.switch_source("html", "automatic API fallback: " + engine.safe_detail(exc))
-                        continue
-                    if recoverable or str(exc).startswith("[REQUEST_LIMIT]"):
-                        crawler.input_reason = "source_error" if recoverable else "request_budget"
-                        emit("input_required", level="warning", message=engine.safe_detail(exc),
-                             detail={"reason": crawler.input_reason, "choices": ["resume", "change_source", "new_key", "cancel"]})
-                        raise engine.PauseRequested(engine.safe_detail(exc)) from None
+    crawler.checkpoint("starting")
+    emit("state", status="running", message="بدأ عامل التنفيذ.")
+    try:
+        while True:
+            crawler.check_control()
+            try:
+                report = crawler.run()
+                state = "completed_warnings" if report["warnings"] else "completed"
+                break
+            except (engine.SpiderError, engine.ShodanAPIError, OSError) as exc:
+                if isinstance(exc, engine.PauseRequested):
                     raise
-        except (engine.SpiderError, engine.ShodanAPIError, OSError, KeyboardInterrupt) as exc:
-            error = engine.safe_detail(exc)
-            paused = isinstance(exc, (engine.PauseRequested, KeyboardInterrupt))
-            state = "cancelled" if crawler.stop_reason == "cancel" else "waiting_input" if crawler.input_reason else "paused" if paused else "failed"
-            report = crawler.finish("paused" if paused else "failed", error)
-            report["partial_saved"] = True
-        crawler._finalizing = True
-        crawler.checkpoint(report["status"])
-        engine.save_results(args, report)
-        crawler.capture_output_hashes()
-        crawler.checkpoint(report["status"])
-        crawler._sync_live()
-        emit("final", status=state, error=error, stats=crawler.stats(),
-             ip_progress_inputs=crawler_progress_inputs(crawler),
-             message="اكتمل تنفيذ الفروع المكتشفة." if state.startswith("completed") else error,
-             input_reason=crawler.input_reason)
+                recoverable = engine.recoverable_source_error(exc)
+                access_failure = getattr(exc, "http_status", None) in (401, 402, 403) or getattr(exc, "failure_kind", None) in ("auth", "permission", "quota")
+                if recoverable and args.mode == "api" and args.api_fallback == "html" and access_failure and not automatic_fallback_used and crawler.report["requests_attempted"] < args.max_requests:
+                    automatic_fallback_used = True
+                    emit("warning", level="warning", message="تعذر الوصول عبر API؛ محاولة HTML مع حفظ النطاق والتقدم. " + engine.safe_detail(exc))
+                    crawler.switch_source("html", "automatic API fallback: " + engine.safe_detail(exc))
+                    continue
+                if recoverable or str(exc).startswith("[REQUEST_LIMIT]"):
+                    crawler.input_reason = "source_error" if recoverable else "request_budget"
+                    emit("input_required", level="warning", message=engine.safe_detail(exc),
+                         detail={"reason": crawler.input_reason, "choices": ["resume", "change_source", "new_key", "cancel"]})
+                    raise engine.PauseRequested(engine.safe_detail(exc)) from None
+                raise
+    except (engine.SpiderError, engine.ShodanAPIError, OSError, KeyboardInterrupt) as exc:
+        error = engine.safe_detail(exc)
+        # An unrepresentable Retry-After is a persistent source hold, not a
+        # failed extraction or a user pause. Restoring it must retain the same
+        # reason without inventing a deadline or permitting an early request.
+        rate_limit_hold = crawler.wait_unbounded and not crawler.stop_reason
+        if rate_limit_hold:
+            crawler.input_reason = "rate_limit"
+            emit("input_required", level="warning", message=error,
+                 detail={"reason": "rate_limit", "choices": ["cancel"]})
+        paused = rate_limit_hold or isinstance(exc, (engine.PauseRequested, KeyboardInterrupt))
+        state = "cancelled" if crawler.stop_reason == "cancel" else "waiting_input" if crawler.input_reason else "paused" if paused else "failed"
+        report = crawler.finish("paused" if paused else "failed", error)
+        report["partial_saved"] = True
+    crawler._finalizing = True
+    crawler.checkpoint(report["status"])
+    engine.save_results(args, report)
+    crawler.capture_output_hashes()
+    crawler.checkpoint(report["status"])
+    crawler._sync_live()
+    emit("final", status=state, error=error, stats=crawler.stats(),
+         ip_progress_inputs=crawler_progress_inputs(crawler),
+         message="اكتمل تنفيذ الفروع المكتشفة." if state.startswith("completed") else error,
+         input_reason=crawler.input_reason)
     return 0 if state.startswith("completed") else 75 if state in ("paused", "waiting_input", "cancelled") else 1
 
 

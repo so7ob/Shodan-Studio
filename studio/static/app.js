@@ -197,6 +197,7 @@
     if (focusId) Array.from($("jobs-body").querySelectorAll("[data-job]")).find((node) => node.dataset.job === focusId)?.focus({ preventScroll: true });
   }
   function setView(view) {
+    ShodanVPN.workspace();
     state.view = view;
     $("job-filter").value = view;
     document.querySelectorAll("[data-view]").forEach((node) => node.classList.toggle("active", node.dataset.view === view));
@@ -212,6 +213,7 @@
       const data = await api("/api/jobs");
       state.jobs = Array.isArray(data.jobs) ? data.jobs : [];
       renderMetrics(); renderJobs(); setConnected(true);
+      await ShodanVPN.refresh();
       text("last-sync", `آخر تحديث ${new Date().toLocaleTimeString("ar", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}`);
       if (state.selectedId) await refreshDetail();
       else {
@@ -255,6 +257,7 @@
     return `<button class="button small ${css}" data-action="${action}"${disabled ? " disabled" : ""}>${icon(iconName)}${label}</button>`;
   }
   function renderDetail(job) {
+    ShodanVPN.renderJob(job);
     const s = getStats(job);
     text("detail-title", jobTitle(job)); text("detail-query", job.query || "");
     $("detail-status").innerHTML = badge(job.status);
@@ -263,6 +266,10 @@
       ? PHASE[job.status] || STATUS[job.status]?.[0] || "بانتظار البدء"
       : PHASE[s.phase] || (s.phase ? String(s.phase) : PHASE[job.status] || STATUS[job.status]?.[0] || "بانتظار البدء");
     text("detail-phase", phase);
+    const adaptive = job.settings?.strategy === "adaptive";
+    show("detail-planner", adaptive);
+    const decision = s.last_partition;
+    text("detail-planner", decision ? `اختار المخطط ${decision.facet}: ${fmt(decision.children)} فروع، نحو ${fmt(decision.estimated_requests)} طلبات استخراج. فحوص التقسيم: ${fmt(s.facet_probes)}.` : "يفحص IP مباشرة، ويقارن كلفة التقسيم فقط عند الحاجة. قد تتغير الخطة مع النتائج.");
     ShodanIPProgress.updateFromJob($("detail-ip-progress"), job);
     text("detail-current-query", s.current_query || job.query || "—");
     text("stat-completed", s.plan_known ? `${fmt(s.completed_branches)} / ${fmt(s.ready_branches)}` : "—");
@@ -306,10 +313,10 @@
   function renderSettings(job) {
     const s = job.settings || {};
     const entries = [
-      ["المصدر المحدد", sourceText(job.mode)], ["الاستراتيجية", s.strategy === "tree" ? "Tree" : "Priority"],
+      ["المصدر المحدد", sourceText(job.mode)], ["الاستراتيجية", s.strategy === "adaptive" ? "تقليل الاستعلامات · Adaptive" : s.strategy === "tree" ? "Tree" : "Priority"],
       ["عميل الاتصال", s.transport || "curl"], ["نوع العناوين", s.ip_version === "all" ? "IPv4 + IPv6" : `IPv${s.ip_version || "4"}`],
       ["حد الطلبات للجولة", fmt(s.max_requests ?? 500)], ["فاصل الطلبات", `${s.delay ?? 2} s`],
-      ["التقسيم بالترتيب", Array.isArray(s.split_facets) ? s.split_facets.join(" → ") : s.split_facets || "asn → port → version → product"],
+      [s.strategy === "adaptive" ? "مرشحو التقسيم" : "التقسيم بالترتيب", Array.isArray(s.split_facets) ? s.split_facets.join(" → ") : s.split_facets || "asn → port → version → product"],
       ["عند تعذّر API", s.api_fallback === "stop" ? "التوقف" : "محاولة HTML"],
       ["أولوية الطابور", String(job.priority ?? 0)], ["تاريخ الإنشاء", dateText(job.created_at)],
     ];
@@ -411,9 +418,16 @@
     if (!dialog.open) dialog.showModal();
   }
   function openCreate() {
-    $("create-form").reset(); setFormError("create-error", "");
+    $("create-form").reset(); ShodanVPN.prepareCreate(); setFormError("create-error", "");
     $("create-form").elements.demo.checked = !!state.session?.demo;
-    updateKeyField("create"); openDialog("create-dialog");
+    updatePlannerFields(); updateKeyField("create"); openDialog("create-dialog");
+  }
+  function updatePlannerFields(resetCandidates = false) {
+    const fields = $("create-form").elements;
+    const adaptive = fields.strategy.value === "adaptive";
+    fields.always_asn.disabled = adaptive;
+    if (adaptive) fields.always_asn.checked = false;
+    if (resetCandidates) fields.split_facets.value = adaptive ? "port,version,asn,country,product,org,os,city" : "asn,port,version,product";
   }
   function updateKeyField(prefix) {
     const mode = $(`${prefix}-mode`).value;
@@ -519,6 +533,7 @@
       dialog.addEventListener("close", () => dialog.querySelectorAll('input[type="password"]').forEach((input) => { input.value = ""; }));
     });
     ["create", "resume", "import"].forEach((prefix) => $(`${prefix}-mode`).addEventListener("change", () => updateKeyField(prefix)));
+    $("create-form").elements.strategy.addEventListener("change", () => updatePlannerFields(true));
     $("create-form").addEventListener("submit", async (event) => {
       event.preventDefault(); setFormError("create-error", "");
       const form = event.currentTarget; const fields = form.elements;
@@ -539,7 +554,7 @@
       if (key && payload.mode !== "html") payload.api_key = key;
       $("create-submit").disabled = true;
       try {
-        const data = await post("/api/jobs", payload); fields.api_key.value = "";
+        const data = await post("/api/jobs", {...payload, network:ShodanVPN.createPolicy()}); fields.api_key.value = "";
         $("create-dialog").close(); toast("أُضيفت المهمة إلى طابور التنفيذ.");
         setView("all"); $("job-search").value = "";
         await refreshAll(); const job = data.job || data; if (job.id) await selectJob(job.id);
@@ -604,6 +619,7 @@
     document.addEventListener("keydown", (event) => { if (event.key === "Escape") closeSidebar(); });
     window.addEventListener("online", () => refreshAll());
   }
+  ShodanVPN.init({api, toast, closeSidebar, refreshAll, openResume, runAction, currentJob: id => state.jobs.find(j => j.id === id)});
   bindEvents(); loadSession();
   window.setInterval(() => { if (!document.hidden && state.session?.authenticated) refreshAll(); }, 2000);
   window.setInterval(updateCountdown, 1000);

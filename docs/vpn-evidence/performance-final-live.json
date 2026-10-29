@@ -1,0 +1,191 @@
+{
+  "kind": "live-Premium-performance-authenticated-dashboard-API",
+  "version": "1.3.1",
+  "before": {
+    "routes4": "57209d87c3c06731abc0a4875ac7ba7cfe5a37ecd2a424d0b524b25dd00aeff6",
+    "routes6": "02aace27e9a18a96f0cb3d3ec66c9521d42d30beb56e3df85927f78fcf37c5a5",
+    "rules": "fbf9509a2b397dfa9b419538718ef19c596274d1c191db8809edcf1d72c07209",
+    "firewall": "baddc72e157630445221143b4f1551e179ed0f5a76a2b569dc26a0272c252f50",
+    "dns": "f5107060afa743c7bbbbde6bf8033200338d0df9f3d9e8dfabcd02258c923097",
+    "gui": "64cbcd367ab044937a250246830552a421cdc46db64f0be2059b0498fb799f81",
+    "pids": {
+      "AmneziaVPN": "67394",
+      "ssh": "1026"
+    }
+  },
+  "connections": [
+    {
+      "location": "ro",
+      "elapsed_ms": 9154,
+      "report": {
+        "dns": true,
+        "tcp": true,
+        "tls": true,
+        "source_access": "not_tested",
+        "dns_ms": 197,
+        "destination_ms": 626,
+        "http": true,
+        "egress_ip": "135.136.73.166",
+        "geolocation": null,
+        "egress_ms": 929,
+        "target": "www.shodan.io",
+        "latency_ms": 936,
+        "healthy": true,
+        "scope": "worker",
+        "interface_up": true,
+        "route_verified": true,
+        "leak_protection": true,
+        "handshake": true,
+        "tunnel_healthy": true,
+        "checked_at": 1792874239.2540927,
+        "connection_timings": {
+          "configuration_ms": 2192,
+          "interface_ms": 264,
+          "verification_ms": 6378,
+          "total_ms": 8835
+        }
+      },
+      "max_dashboard_poll_ms": 12
+    },
+    {
+      "location": "de",
+      "elapsed_ms": 10847,
+      "report": {
+        "dns": true,
+        "tcp": true,
+        "tls": true,
+        "source_access": "not_tested",
+        "dns_ms": 356,
+        "destination_ms": 938,
+        "http": true,
+        "egress_ip": "135.136.45.186",
+        "geolocation": null,
+        "egress_ms": 2834,
+        "target": "www.shodan.io",
+        "latency_ms": 2840,
+        "healthy": true,
+        "scope": "worker",
+        "interface_up": true,
+        "route_verified": true,
+        "leak_protection": true,
+        "handshake": true,
+        "tunnel_healthy": true,
+        "checked_at": 1792874250.1754472,
+        "connection_timings": {
+          "configuration_ms": 1808,
+          "interface_ms": 366,
+          "verification_ms": 8292,
+          "total_ms": 10466
+        }
+      },
+      "max_dashboard_poll_ms": 13
+    },
+    {
+      "location": "ro",
+      "elapsed_ms": 9814,
+      "report": {
+        "dns": true,
+        "tcp": true,
+        "tls": true,
+        "source_access": "not_tested",
+        "dns_ms": 303,
+        "destination_ms": 936,
+        "http": true,
+        "egress_ip": "135.136.73.166",
+        "geolocation": null,
+        "egress_ms": 2375,
+        "target": "www.shodan.io",
+        "latency_ms": 2381,
+        "healthy": true,
+        "scope": "worker",
+        "interface_up": true,
+        "route_verified": true,
+        "leak_protection": true,
+        "handshake": true,
+        "tunnel_healthy": true,
+        "checked_at": 1792874260.2982275,
+        "connection_timings": {
+          "configuration_ms": 1534,
+          "interface_ms": 288,
+          "verification_ms": 7820,
+          "total_ms": 9641
+        }
+      },
+      "max_dashboard_poll_ms": 15
+    },
+    {
+      "location": "ro",
+      "elapsed_ms": 274,
+      "report": {
+        "dns": true,
+        "tcp": true,
+        "tls": true,
+        "source_access": "not_tested",
+        "dns_ms": 303,
+        "destination_ms": 936,
+        "http": true,
+        "egress_ip": "135.136.73.166",
+        "geolocation": null,
+        "egress_ms": 2375,
+        "target": "www.shodan.io",
+        "latency_ms": 2381,
+        "healthy": true,
+        "scope": "worker",
+        "interface_up": true,
+        "route_verified": true,
+        "leak_protection": true,
+        "handshake": true,
+        "tunnel_healthy": true,
+        "checked_at": 1792874260.2982275,
+        "connection_timings": {
+          "configuration_ms": 1534,
+          "interface_ms": 288,
+          "verification_ms": 7820,
+          "total_ms": 9641
+        }
+      },
+      "max_dashboard_poll_ms": 17
+    }
+  ],
+  "management_checks": 114,
+  "historical_ro_connect_ms": 28718,
+  "prechange_gateway_account_info_ms": 8786,
+  "diagnostics": {
+    "dns": true,
+    "tcp": true,
+    "tls": true,
+    "source_access": "check_failed",
+    "dns_ms": 300,
+    "error": "TimeoutError",
+    "destination_ms": 4931,
+    "http": true,
+    "egress_ip": "135.136.73.166",
+    "geolocation": null,
+    "egress_ms": 1379,
+    "target": "www.shodan.io",
+    "latency_ms": 4937,
+    "healthy": true,
+    "scope": "worker",
+    "interface_up": true,
+    "route_verified": true,
+    "leak_protection": true,
+    "handshake": true,
+    "tunnel_healthy": true,
+    "checked_at": 1792874265.9308581
+  },
+  "restored_original_profile": true,
+  "success": true,
+  "after": {
+    "routes4": "57209d87c3c06731abc0a4875ac7ba7cfe5a37ecd2a424d0b524b25dd00aeff6",
+    "routes6": "02aace27e9a18a96f0cb3d3ec66c9521d42d30beb56e3df85927f78fcf37c5a5",
+    "rules": "fbf9509a2b397dfa9b419538718ef19c596274d1c191db8809edcf1d72c07209",
+    "firewall": "baddc72e157630445221143b4f1551e179ed0f5a76a2b569dc26a0272c252f50",
+    "dns": "f5107060afa743c7bbbbde6bf8033200338d0df9f3d9e8dfabcd02258c923097",
+    "gui": "64cbcd367ab044937a250246830552a421cdc46db64f0be2059b0498fb799f81",
+    "pids": {
+      "AmneziaVPN": "67394",
+      "ssh": "1026"
+    }
+  },
+  "host_unchanged": true
+}

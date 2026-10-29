@@ -1,0 +1,23 @@
+{
+  "observed_at": "2026-10-24T21:38:18.473467+00:00",
+  "job_id": "63d837ce5331009394884dc936273831",
+  "status": "waiting_input",
+  "input_reason": "rate_limit",
+  "source": "website-html",
+  "demo": false,
+  "saved_job_ips": 28,
+  "report_unique_ips": 28,
+  "checkpoint_candidates": 28,
+  "cached_facets": 21,
+  "integrity_check": "ok",
+  "checkpoint_saved": true,
+  "full_job_completed": false,
+  "browser": {
+    "running": false,
+    "job_id": null,
+    "profile_id": null,
+    "state": "closed"
+  },
+  "deployed_runtime_matches_checkout": true,
+  "served_browser_js_matches_checkout": true
+}

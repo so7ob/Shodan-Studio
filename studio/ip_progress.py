@@ -276,7 +276,8 @@ def crawler_progress_inputs(crawler) -> dict:
                          "processed_records": processed if disjoint else None,
                          "completed": complete})
     return {"branches": compact_branches(branches),
-            "planning_complete": crawler.report.get("planning_stage") in {"extracting", "completed"},
+            "planning_complete": (plan.get("planning_complete", True) and
+                                  crawler.report.get("planning_stage") in {"extracting", "completed"}),
             "traversal_completed": traversed,
             "denominator_reason": "terminal_record_scopes" if disjoint else "overlapping_or_unproven_scopes"}
 

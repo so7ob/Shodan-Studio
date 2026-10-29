@@ -1,0 +1,18 @@
+{
+  "realService": true,
+  "realPremiumCatalog": true,
+  "locations": 55,
+  "countryFilter": "Germany",
+  "sizes": [
+    {
+      "width": 1280,
+      "axeViolations": 0,
+      "noOverflow": true
+    },
+    {
+      "width": 375,
+      "axeViolations": 0,
+      "noOverflow": true
+    }
+  ]
+}

@@ -279,6 +279,29 @@ class StudioApp:
         if path == "/api/logout" and method == "POST":
             session = self.rotate_session(token, None, env, headers)
             return self.json_response(self.session_payload(session))
+        if path == "/api/vpn" and method in {"GET", "HEAD"}:
+            return self.json_response(self.manager.vpn.summary())
+        if path == "/api/vpn/discover" and method in {"GET", "HEAD"}:
+            return self.json_response({"candidates": self.manager.vpn.provider.discover_profiles()})
+        if path == "/api/vpn/profiles" and method == "POST":
+            return self.json_response({"profile": self.manager.vpn.add(payload)}, 201)
+        if path == "/api/vpn/actions" and method == "POST":
+            return self.json_response(self.manager.vpn_action(payload))
+        if path == "/api/vpn/premium" and method == "POST":
+            return self.json_response(self.manager.vpn_premium(payload))
+        if path == "/api/vpn/diagnostics" and method == "POST":
+            if set(payload) != {"scope"}:
+                raise ValueError('طلب التشخيص غير صالح.')
+            return self.json_response(self.manager.vpn.diagnostics(payload['scope']))
+        vpn_match = re.fullmatch(r"/api/vpn/profiles/([a-f0-9]{32})", path)
+        if vpn_match and method == "POST":
+            return self.json_response({"profile": self.manager.vpn_update(vpn_match[1], payload)})
+        network_match = re.fullmatch(r"/api/jobs/([a-f0-9]{32})/network", path)
+        browser_match = re.fullmatch(r"/api/jobs/([a-f0-9]{32})/browser", path)
+        if browser_match and method == 'POST':
+            return self.json_response(self.manager.browser_action(browser_match[1],payload))
+        if network_match and method == "POST":
+            return self.json_response({"job": self.manager.network_settings(network_match[1], payload)})
         if path == "/api/jobs":
             if method in {"GET", "HEAD"}:
                 return self.json_response(self.manager.list_jobs())
@@ -344,6 +367,9 @@ class StudioApp:
             "/static/app.css": ("app.css", "text/css; charset=utf-8"),
             "/static/ip_progress.js": ("ip_progress.js", "text/javascript; charset=utf-8"),
             "/static/ip_progress.css": ("ip_progress.css", "text/css; charset=utf-8"),
+            "/static/vpn.js": ("vpn.js", "text/javascript; charset=utf-8"),
+            "/static/browser.js": ("browser.js", "text/javascript; charset=utf-8"),
+            "/static/vpn.css": ("vpn.css", "text/css; charset=utf-8"),
             "/favicon.svg": ("favicon.svg", "image/svg+xml"),
         }
         item = files.get(path)

@@ -1,0 +1,165 @@
+{
+  "uid": 999,
+  "engine": "/opt/shodan-studio/releases/release-rRDYnhyN/studio/engine.py",
+  "benchmark": {
+    "live_requests": false,
+    "cases": [
+      {
+        "case": "small_60",
+        "synthetic": true,
+        "priority": {
+          "requests": 28,
+          "branches": 26,
+          "unique_ips": 60,
+          "chosen": null,
+          "facet_requests": [
+            "country",
+            "city"
+          ]
+        },
+        "adaptive": {
+          "requests": 1,
+          "branches": 1,
+          "unique_ips": 60,
+          "chosen": null,
+          "facet_requests": []
+        },
+        "identical_ip_sets": true
+      },
+      {
+        "case": "160_port",
+        "synthetic": true,
+        "priority": {
+          "requests": 55,
+          "branches": 52,
+          "unique_ips": 160,
+          "chosen": null,
+          "facet_requests": [
+            "country",
+            "city",
+            "city"
+          ]
+        },
+        "adaptive": {
+          "requests": 4,
+          "branches": 2,
+          "unique_ips": 160,
+          "chosen": "port",
+          "facet_requests": [
+            "port"
+          ]
+        },
+        "identical_ip_sets": true
+      },
+      {
+        "case": "160_version",
+        "synthetic": true,
+        "priority": {
+          "requests": 55,
+          "branches": 52,
+          "unique_ips": 160,
+          "chosen": null,
+          "facet_requests": [
+            "country",
+            "city",
+            "city"
+          ]
+        },
+        "adaptive": {
+          "requests": 5,
+          "branches": 2,
+          "unique_ips": 160,
+          "chosen": "version",
+          "facet_requests": [
+            "port",
+            "version"
+          ]
+        },
+        "identical_ip_sets": true
+      },
+      {
+        "case": "160_country_only",
+        "synthetic": true,
+        "priority": {
+          "requests": 55,
+          "branches": 52,
+          "unique_ips": 160,
+          "chosen": null,
+          "facet_requests": [
+            "country",
+            "city",
+            "city"
+          ]
+        },
+        "adaptive": {
+          "requests": 7,
+          "branches": 2,
+          "unique_ips": 160,
+          "chosen": "country",
+          "facet_requests": [
+            "port",
+            "version",
+            "asn",
+            "country"
+          ]
+        },
+        "identical_ip_sets": true
+      },
+      {
+        "case": "160_fragmented_port",
+        "synthetic": true,
+        "priority": {
+          "requests": 55,
+          "branches": 52,
+          "unique_ips": 160,
+          "chosen": null,
+          "facet_requests": [
+            "country",
+            "city",
+            "city"
+          ]
+        },
+        "adaptive": {
+          "requests": 5,
+          "branches": 2,
+          "unique_ips": 160,
+          "chosen": "version",
+          "facet_requests": [
+            "port",
+            "version"
+          ]
+        },
+        "identical_ip_sets": true
+      },
+      {
+        "case": "200_records_50_ips",
+        "synthetic": true,
+        "priority": {
+          "requests": 55,
+          "branches": 52,
+          "unique_ips": 50,
+          "chosen": null,
+          "facet_requests": [
+            "country",
+            "city",
+            "city"
+          ]
+        },
+        "adaptive": {
+          "requests": 1,
+          "branches": 1,
+          "unique_ips": 50,
+          "chosen": null,
+          "facet_requests": []
+        },
+        "identical_ip_sets": true
+      }
+    ]
+  },
+  "health": {
+    "ok": true,
+    "version": "1.5.0"
+  },
+  "source_files_compared": 27,
+  "all_source_matches": true
+}

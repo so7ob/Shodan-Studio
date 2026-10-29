@@ -1,0 +1,10 @@
+{
+  "transport": "curl",
+  "mode": "html",
+  "target": "existing_job_facet",
+  "job_mutated": false,
+  "success": false,
+  "error_code": "[HTTP_403]",
+  "browser_challenge": true,
+  "duration_ms": 8882
+}

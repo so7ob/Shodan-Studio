@@ -24,6 +24,7 @@ class JobsTests(unittest.TestCase):
         payload = {"title": "Fixture", "query": 'http.component:"php" country:"EG"', "mode": "html",
                    "settings": {"demo": True, "transport": "python", "delay": 0}}
         payload.update(overrides)
+        payload['settings'] = {'strategy':'priority', **payload['settings']}
         return self.manager.create_job(payload)
 
     def wait(self, job_id, predicate=None, seconds=12):

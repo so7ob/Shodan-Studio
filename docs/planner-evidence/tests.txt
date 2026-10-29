@@ -1,0 +1,5 @@
+Debian 12 / Python 3.11
+Ran 207 tests in 124.055s
+
+OK
+JavaScript: 11 tests passed. Installer --check and JS syntax passed.

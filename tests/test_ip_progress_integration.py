@@ -119,8 +119,10 @@ class DurableProgressTests(unittest.TestCase):
         self.temp.cleanup()
 
     def create(self, **changes):
-        return self.manager.create_job({"query": 'fixture country:"EG"', "mode": "html",
-            "settings": {"demo": True, "delay": 0, "transport": "python"}, **changes})
+        payload = {"query": 'fixture country:"EG"', "mode": "html",
+            "settings": {"demo": True, "delay": 0, "transport": "python"}, **changes}
+        payload['settings'] = {'strategy':'priority', **payload['settings']}
+        return self.manager.create_job(payload)
 
     def wait(self, job_id):
         deadline = time.monotonic() + 15

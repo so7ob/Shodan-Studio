@@ -13,8 +13,8 @@ class JobValidationError(ValueError):
 
 DEFAULT_SETTINGS = {
     "transport": "curl", "timeout": 30.0, "delay": 2.0,
-    "max_requests": 500, "ip_version": "all", "strategy": "priority",
-    "split_facets": ["asn", "port", "version", "product"],
+    "max_requests": 500, "ip_version": "all", "strategy": "adaptive",
+    "split_facets": list(engine.ADAPTIVE_FACETS),
     "max_plan_nodes": 20000, "api_facet_limit": 1000, "always_asn": False,
     "api_fallback": "html", "rate_limit_retries": 3,
     "retry_base_delay": 30.0, "max_retry_wait": 600.0,
@@ -61,10 +61,12 @@ def settings_from(payload: Any, *, allow_demo=False) -> dict:
     if unknown:
         raise JobValidationError("يوجد إعداد غير مدعوم في المهمة.")
     result = {**DEFAULT_SETTINGS, **payload}
+    if result["strategy"] in ("priority", "tree") and "split_facets" not in payload:
+        result["split_facets"] = list(engine.DEFAULT_SPLIT_FACETS)
     result["split_facets"] = list(result["split_facets"]) if isinstance(result["split_facets"], (list, tuple)) else result["split_facets"]
     choices = {
         "transport": ("curl", "python"), "ip_version": ("4", "6", "all"),
-        "strategy": ("priority", "tree"), "api_fallback": ("html", "stop"),
+        "strategy": ("adaptive", "priority", "tree"), "api_fallback": ("html", "stop"),
         "on_rate_limit": ("pause", "stop"),
     }
     for field, options in choices.items():
@@ -82,8 +84,11 @@ def settings_from(payload: Any, *, allow_demo=False) -> dict:
         if type(result[field]) is not bool:
             raise JobValidationError(f"قيمة {field} يجب أن تكون اختيارًا منطقيًا.")
     facets = result["split_facets"]
-    if not isinstance(facets, list) or not facets or len(facets) > 6 or any(not isinstance(f, str) or f not in engine.SPLIT_FACETS for f in facets) or len(set(facets)) != len(facets):
-        raise JobValidationError("اختر قائمة تقسيم صحيحة من asn, port, version, product, org, os دون تكرار.")
+    allowed = frozenset(engine.ADAPTIVE_FACETS) if result["strategy"] == "adaptive" else engine.SPLIT_FACETS
+    if not isinstance(facets, list) or not facets or len(facets) > len(allowed) or any(not isinstance(f, str) or f not in allowed for f in facets) or len(set(facets)) != len(facets):
+        raise JobValidationError("اختر متغيرات تقسيم مدعومة دون تكرار؛ country وcity متاحان في الوضع التكيفي.")
+    if result["strategy"] == "adaptive" and result["always_asn"]:
+        raise JobValidationError("المرور الإلزامي على ASN متاح فقط في Priority أو Tree.")
     agent = result["user_agent"]
     if not isinstance(agent, str):
         raise JobValidationError("User-Agent غير صالح.")
@@ -102,7 +107,7 @@ def settings_from(payload: Any, *, allow_demo=False) -> dict:
 def validate_job(payload: Any, *, allow_demo=False) -> tuple[dict, str | None]:
     if not isinstance(payload, dict):
         raise JobValidationError("المهمة يجب أن تكون كائنًا.")
-    if set(payload) - {"title", "query", "mode", "api_key", "settings", "priority"}:
+    if set(payload) - {"title", "query", "mode", "api_key", "settings", "priority", "network"}:
         raise JobValidationError("توجد حقول غير مدعومة في المهمة.")
     query = text(payload.get("query"), "استعلام Shodan", 8192)
     try:
@@ -121,4 +126,5 @@ def validate_job(payload: Any, *, allow_demo=False) -> tuple[dict, str | None]:
     # Catch pasted credentials in a public title/query before any persistence.
     if key and (key in query or key in title or key in settings["user_agent"]):
         raise JobValidationError("ضع مفتاح API في حقل المفتاح فقط.")
-    return {"title": title, "query": query, "mode": mode, "settings": settings, "priority": priority}, key
+    from .vpn_config import policy
+    return {"title": title, "query": query, "mode": mode, "settings": settings, "priority": priority, **policy(payload.get("network"))}, key

@@ -1,0 +1,22 @@
+{
+  "provider": "simulated",
+  "locations": 55,
+  "enrollment": true,
+  "keyCleared": true,
+  "filter": true,
+  "immutableCountry": true,
+  "verifiedConnection": true,
+  "evidence": [
+    {
+      "width": 1280,
+      "axeViolations": 0,
+      "noOverflow": true
+    },
+    {
+      "width": 375,
+      "axeViolations": 0,
+      "noOverflow": true
+    }
+  ],
+  "errors": []
+}

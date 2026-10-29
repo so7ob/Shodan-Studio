@@ -158,6 +158,44 @@ class WorkerLifecycleTests(unittest.TestCase):
         self.assertEqual(events[-1]["stats"]["unique_ips"], 292)
         self.assertEqual(len(engine.load_checkpoint(self.job_dir / "checkpoint.json")["state"]["candidates"]), 292)
 
+    def test_duplicate_launch_preserves_live_progress_and_emits_no_events(self):
+        # The active worker may have collected IPs since its last checkpoint.
+        # A duplicate must not regenerate live-ips from that older checkpoint.
+        self.assertEqual(self.run_capture()[0], 0)
+        live = self.job_dir / "live-ips.txt"
+        live.write_text(live.read_text() + "203.0.113.42\n")
+        before = {p.name: p.read_bytes() for p in self.job_dir.iterdir() if p.is_file()}
+        with engine.CheckpointLock(self.job_dir / "checkpoint.json"):
+            with patch("studio.worker.build_args", wraps=build_args) as build:
+                with patch("studio.worker.emit") as emit:
+                    with self.assertRaisesRegex(engine.CheckpointError, "CHECKPOINT_BUSY"):
+                        self.run_capture()
+                emit.assert_not_called()
+            build.assert_not_called()
+        after = {p.name: p.read_bytes() for p in self.job_dir.iterdir() if p.is_file()}
+        self.assertEqual(after, before)
+
+    def test_duplicate_fresh_launch_creates_no_progress_files(self):
+        with engine.CheckpointLock(self.job_dir / "checkpoint.json"):
+            with self.assertRaisesRegex(engine.CheckpointError, "CHECKPOINT_BUSY"):
+                self.run_capture()
+        self.assertEqual({p.name for p in self.job_dir.iterdir()}, {"checkpoint.json.lock"})
+        self.assertEqual(self.run_capture()[0], 0)
+
+    def test_setup_failure_releases_lock_for_corrected_resume(self):
+        with patch("studio.worker.build_args", side_effect=engine.SpiderError("fixture setup failure")):
+            with self.assertRaisesRegex(engine.SpiderError, "fixture setup failure"):
+                self.run_capture()
+        self.assertEqual(self.run_capture()[0], 0)
+        # Repeated resume must preserve deduplication and use cached pages.
+        for _ in range(2):
+            code, events = self.run_capture()
+            self.assertEqual(code, 0)
+            self.assertEqual(events[-1]["stats"]["requests_this_run"], 0)
+            ips = (self.job_dir / "result.txt").read_text().splitlines()
+            self.assertEqual(len(ips), 292)
+            self.assertEqual(len(set(ips)), 292)
+
     def test_resume_recovers_crash_after_output_commit_before_hash_checkpoint(self):
         class InjectedCrash(BaseException):
             pass

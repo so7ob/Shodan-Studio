@@ -1,0 +1,21 @@
+{
+  "provider": "simulated",
+  "evidence": [
+    {
+      "width": 1280,
+      "axeViolations": 0,
+      "noPageOverflow": true
+    },
+    {
+      "width": 375,
+      "axeViolations": 0,
+      "noPageOverflow": true
+    }
+  ],
+  "diagnosticsAxe": 0,
+  "jobCardAxe": 0,
+  "policyAxe": 0,
+  "invalidProfileRejected": true,
+  "keyboardJobEntry": true,
+  "browserErrors": []
+}

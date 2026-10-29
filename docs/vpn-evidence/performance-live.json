@@ -1,0 +1,101 @@
+{
+  "kind": "live-Premium-performance-authenticated-dashboard-API",
+  "version": "1.3.1",
+  "before": {
+    "routes4": "57209d87c3c06731abc0a4875ac7ba7cfe5a37ecd2a424d0b524b25dd00aeff6",
+    "routes6": "02aace27e9a18a96f0cb3d3ec66c9521d42d30beb56e3df85927f78fcf37c5a5",
+    "rules": "fbf9509a2b397dfa9b419538718ef19c596274d1c191db8809edcf1d72c07209",
+    "firewall": "baddc72e157630445221143b4f1551e179ed0f5a76a2b569dc26a0272c252f50",
+    "dns": "f5107060afa743c7bbbbde6bf8033200338d0df9f3d9e8dfabcd02258c923097",
+    "gui": "64cbcd367ab044937a250246830552a421cdc46db64f0be2059b0498fb799f81",
+    "pids": {
+      "AmneziaVPN": "67394",
+      "ssh": "1026"
+    }
+  },
+  "connections": [
+    {
+      "location": "ro",
+      "elapsed_ms": 16195,
+      "report": {
+        "dns": true,
+        "tcp": true,
+        "tls": true,
+        "source_access": "not_tested",
+        "destination_ms": 822,
+        "http": true,
+        "egress_ip": "135.136.73.166",
+        "geolocation": null,
+        "egress_ms": 933,
+        "target": "www.shodan.io",
+        "latency_ms": 938,
+        "healthy": true,
+        "scope": "worker",
+        "interface_up": true,
+        "route_verified": true,
+        "leak_protection": true,
+        "handshake": true,
+        "tunnel_healthy": true,
+        "checked_at": 1792873906.3549273,
+        "connection_timings": {
+          "configuration_ms": 9356,
+          "interface_ms": 271,
+          "verification_ms": 6377,
+          "total_ms": 16005
+        }
+      },
+      "max_dashboard_poll_ms": 12
+    },
+    {
+      "location": "de",
+      "elapsed_ms": 12404,
+      "report": {
+        "dns": true,
+        "tcp": true,
+        "tls": true,
+        "source_access": "not_tested",
+        "destination_ms": 4436,
+        "http": true,
+        "egress_ip": "135.136.45.186",
+        "geolocation": null,
+        "egress_ms": 4487,
+        "target": "www.shodan.io",
+        "latency_ms": 4493,
+        "healthy": true,
+        "scope": "worker",
+        "interface_up": true,
+        "route_verified": true,
+        "leak_protection": true,
+        "handshake": true,
+        "tunnel_healthy": true,
+        "checked_at": 1792873918.8101244,
+        "connection_timings": {
+          "configuration_ms": 1713,
+          "interface_ms": 320,
+          "verification_ms": 9939,
+          "total_ms": 11972
+        }
+      },
+      "max_dashboard_poll_ms": 140
+    }
+  ],
+  "management_checks": 255,
+  "historical_ro_connect_ms": 28718,
+  "prechange_gateway_account_info_ms": 8786,
+  "success": false,
+  "error": "Tunnel verification failed; no worker was started. dns=failed, tcp=failed, tls=failed, http=failed, handshake=failed, route_verified=ok, leak_protection=ok",
+  "restored_original_profile": true,
+  "after": {
+    "routes4": "57209d87c3c06731abc0a4875ac7ba7cfe5a37ecd2a424d0b524b25dd00aeff6",
+    "routes6": "02aace27e9a18a96f0cb3d3ec66c9521d42d30beb56e3df85927f78fcf37c5a5",
+    "rules": "fbf9509a2b397dfa9b419538718ef19c596274d1c191db8809edcf1d72c07209",
+    "firewall": "baddc72e157630445221143b4f1551e179ed0f5a76a2b569dc26a0272c252f50",
+    "dns": "f5107060afa743c7bbbbde6bf8033200338d0df9f3d9e8dfabcd02258c923097",
+    "gui": "64cbcd367ab044937a250246830552a421cdc46db64f0be2059b0498fb799f81",
+    "pids": {
+      "AmneziaVPN": "67394",
+      "ssh": "1026"
+    }
+  },
+  "host_unchanged": true
+}

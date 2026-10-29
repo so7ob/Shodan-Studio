@@ -1,0 +1,20 @@
+/* Inherit Studio's existing dark RTL tokens and type; no external fonts/assets. */
+.vpn-section{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px;margin-block:16px;min-width:0}
+.vpn-kv{display:grid;grid-template-columns:repeat(auto-fit,minmax(175px,1fr));gap:16px;margin-block:20px}
+.vpn-kv dt{color:var(--muted);font-size:12px;margin-block-end:6px}.vpn-kv dd{margin:0;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
+.vpn-actions{display:flex;flex-wrap:wrap;gap:8px}.vpn-scroll{max-width:100%;overflow:auto}.vpn-scroll table{min-width:820px;width:100%;border-collapse:collapse;text-align:start}
+.vpn-scroll th,.vpn-scroll td{padding:12px;text-align:start;border-block-end:1px solid var(--line);vertical-align:top}.vpn-scroll td small{display:block;color:var(--muted);margin-block-start:6px}.vpn-scroll th{color:var(--muted);font-weight:500}
+.vpn-copy{max-width:80ch;line-height:1.9}.vpn-section h2,.vpn-section h3{margin-block:0 12px}.vpn-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.vpn-error{color:var(--red,#ff9b9b);overflow-wrap:anywhere;white-space:pre-wrap}
+.vpn-policy{border:1px solid var(--line);border-radius:8px;padding:16px;margin-block:16px}.vpn-policy legend{padding-inline:8px}.vpn-policy select[multiple]{min-height:100px}.vpn-heading{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+#job-network-state,#job-network-phase{line-height:1.9;overflow-wrap:anywhere}#job-network-count{color:var(--muted);font-variant-numeric:tabular-nums}
+@media(max-width:700px){.vpn-grid{grid-template-columns:1fr}.vpn-section{padding:14px}.vpn-kv{grid-template-columns:1fr 1fr;gap:12px}.vpn-actions .button{min-height:36px}}
+
+/* Uses the dashboard's existing RTL palette and native modal controls. */
+.browser-modal { width: min(96vw, 74rem); max-width: 74rem; }
+.browser-modal .modal-footer { flex-wrap: wrap; }
+.browser-screen { background: var(--bg); border: 1px solid var(--line); min-height: 8rem; overflow: hidden; }
+#browser-frame { width: 100%; height: auto; display: block; aspect-ratio: 1100/760; object-fit: contain; cursor: crosshair; }
+#browser-frame:focus-visible { outline: 2px solid var(--cyan); outline-offset: -2px; }
+.browser-input { display: flex; align-items: end; gap: .75rem; margin-block: .75rem; }
+.browser-input .field { flex: 1; min-width: 0; }
+.browser-keys { flex-wrap: wrap; }

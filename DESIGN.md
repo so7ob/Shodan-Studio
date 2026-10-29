@@ -22,3 +22,27 @@ keyboard entry to details, no document horizontal overflow, matching list/detail
 progress widgets. The existing table scrolls horizontally on mobile. Screenshots
 and browser results are in `docs/ip-progress-evidence/`. This is not a full-site
 accessibility certification; manual screen-reader testing was not performed.
+
+## VPN Manager extension — 2026-10-24
+
+Preserve the existing compact Arabic RTL operational dashboard, fonts and dark
+palette. The design remains precise, practical and legible. Add two navigation
+items, a dense profile/audit table, a definition-list connection summary, and
+separate host/worker diagnostic panels. No external fonts, images or UI framework.
+Use existing `--panel`, `--line`, `--text`, `--muted` and button tokens; tables scroll
+within their container on mobile. Native modal forms and text labels keep actions
+keyboard accessible. An unverified request must never appear as successful.
+
+Acceptance: VPN page at 375/1280, no document overflow; zero axe violations in VPN,
+diagnostics, job-network and policy controls; keyboard job entry and modal close.
+Evidence uses a simulated provider and is labelled accordingly. Namespace/runtime
+proof is a separate root-only lab; these screenshots do not prove a Premium egress.
+
+## Dynamic Premium catalog
+
+Keep the same Arabic RTL tokens and native dialogs. A subscription status panel
+precedes the existing connection table; a labelled search input handles a long
+country list without changing the queue/detail layout. Show cached-versus-gateway
+catalog provenance, device registration and slot counts separately from verified
+tunnel status. Never preload or display subscription credentials. Premium country
+labels come from the account catalog and cannot be edited into a false location.

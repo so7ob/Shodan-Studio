@@ -1,0 +1,43 @@
+{
+  "kind": "real-Premium-tunnel-loss-and-failover-with-synthetic-job",
+  "live_shodan_search": false,
+  "previous_profile": "9eb36ef2759355819a6301c9f2068f28",
+  "new_profile": "a567dab31f885ffca68a5669147d7fae",
+  "lost_health": {
+    "scope": "worker",
+    "healthy": false,
+    "error": "VPN_NOT_READY",
+    "egress_ip": null,
+    "interface_up": false,
+    "route_verified": false,
+    "leak_protection": true,
+    "checked_at": 1792871167.5725365
+  },
+  "python_egress_blocked": true,
+  "curl_egress_blocked": true,
+  "management_available_during_loss": true,
+  "recovered": {
+    "active_vpn_profile": "a567dab31f885ffca68a5669147d7fae",
+    "current_egress_ip": "135.136.45.186",
+    "network_health": "healthy",
+    "network_phase": "resuming_extraction",
+    "last_failover_at": "2026-10-24T19:46:29.921960+00:00",
+    "failover_count": 1
+  },
+  "duration_seconds": 22.21,
+  "audit": [
+    {
+      "at": "2026-10-24T19:46:29.915974+00:00",
+      "action": "connect",
+      "job_id": "490afdd68ae4359a2273b9fcf3997dc1",
+      "previous_profile": null,
+      "new_profile": "a567dab31f885ffca68a5669147d7fae",
+      "reason": "[NETWORK_UNREACHABLE] controlled tunnel disconnect",
+      "verified": true,
+      "duration_ms": 21913,
+      "status": "success"
+    }
+  ],
+  "verified": true,
+  "persisted_failover_limit_after_restart": true
+}

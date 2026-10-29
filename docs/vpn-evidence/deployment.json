@@ -1,0 +1,28 @@
+{
+  "deployed": true,
+  "version": "1.2.0",
+  "previous_release": "/opt/shodan-studio/releases/release-JmNDs7At",
+  "current_release": "/opt/shodan-studio/releases/release-djygXAmo",
+  "backup": "/var/backups/shodan-studio/pre-vpn-20261024-183851.tar.gz",
+  "counts_before": {
+    "jobs": 4,
+    "job_ips": 750,
+    "users": 1,
+    "events": 2608
+  },
+  "counts_after": {
+    "jobs": 4,
+    "job_ips": 750,
+    "users": 1,
+    "events": 2608
+  },
+  "job_files_unchanged": true,
+  "schema_version": 1,
+  "health": {
+    "ok": true,
+    "version": "1.2.0"
+  },
+  "helper_active": true,
+  "amnezia_and_ssh_pids_unchanged": true,
+  "premium_profile_connected": false
+}

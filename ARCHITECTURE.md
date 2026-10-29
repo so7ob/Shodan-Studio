@@ -1,4 +1,4 @@
-# Shodan Studio 1.1.0 — architecture
+# Shodan Studio 1.5.0 — architecture
 
 This release is a self-hosted, single-user application for Debian 12 and a trusted
 local network or an SSH tunnel. It uses Python's standard library, SQLite and a
@@ -13,7 +13,8 @@ multi-tenant service.
 | `studio/store.py` | SQLite WAL, atomic queue claims, events, password/session hashing |
 | `studio/jobs.py` | One-worker scheduler, typed actions, memory-only keys, exports and checkpoint import |
 | `studio/worker.py` | Isolated process adapting the collection engine into structured events and controls |
-| `studio/engine.py` | ShodanSpider 7.1.0 source-resume engine, unchanged from its standalone release |
+| `studio/engine.py` | ShodanSpider source-resume core and legacy traversal |
+| `studio/adaptive.py` | Bounded cost-based partition selection, direct IP probing and deterministic cache replay |
 | `studio/config.py` | Job schema and range validation; no shell parsing |
 | `studio/static/` | Browser interface; same-origin JSON polling every two seconds |
 | `deploy/` | Unprivileged systemd service |
@@ -127,3 +128,45 @@ keep loopback binding and use SSH port forwarding.
 a correctly configured proxy. It does not add TLS to the Python listener or make
 the standard-library reference HTTP server a hardened public production stack.
 For the installation steps and backup instructions, see `README_AR.md`.
+
+## VPN extension (1.2)
+
+`vpn_config.py` parses policy/config data; `vpn.py` owns the provider interface,
+public registry, health/cooldown and durable audit. `vpn_helper.py` owns only the
+fixed namespace/interface and approved root-only files. `vpn_client.py` bridges
+worker stdin/events over an authenticated Unix socket. The helper enters the
+namespace then drops privileges before launching the existing worker. Neither
+curl nor Python gets a host network fallback. `vpn_probe.py` has fixed, bounded
+probes. Metadata migration is additive and backup-first (`vpn_schema.py`).
+
+The existing one-worker queue remains authoritative. Bounded request retries
+occur at the engine request boundary and retain budget accounting. Switching
+occurs only after worker exit/atomic checkpoint persistence. Failed health,
+profile cooldowns, allowlists, and a persisted lifetime switch budget govern
+recovery. HTTP permission/quota/rate limiting is not a VPN-switch signal.
+A helper lease rejects concurrent switches while its worker is alive. Restarted
+jobs retain results and lose stale verified-health claims.
+
+See [VPN operating guide](docs/VPN_MANAGER_AR.md),
+[deployment and rollback](docs/VPN_DEPLOYMENT_AR.md), and
+[discovery/design evidence](docs/VPN_DISCOVERY.md).
+
+## Premium extension (1.3)
+
+`premium.py` implements the AmneziaVPN 5.0.3.0 gateway protocol, with fixed HTTPS
+origins and the pinned production RSA public key. A root-private record persists
+an independent worker UUID. Each country connection obtains a fresh AWG config
+for that UUID; no native export or revoke operation exists. Public country IDs
+are deterministic UUID5 values and reuse the existing job allowlists and audit.
+
+The gateway subprocess runs as `shodan-vpn-gateway`, separate from web/worker,
+with all capabilities dropped and a 28-second deadline. Credentials cross private
+pipes only. The root bootstrap tool reads the installed client without modifying
+it. The authenticated Premium API cannot choose a gateway or command.
+
+Connection verification retries the same tunnel at most three times. Account and
+protocol failures stop failover, as do destination-only failures on a healthy
+tunnel. Dashboard reads during the helper's periodic probe return unverified
+busy status immediately. No database schema change is required beyond VPN v1.
+
+Adaptive planning and legacy checkpoint boundaries are described in [the planner design](docs/ADAPTIVE_PLANNER.md) and [the Arabic operations guide](docs/ADAPTIVE_PLANNER_AR.md).
