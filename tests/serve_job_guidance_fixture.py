@@ -26,7 +26,7 @@ def main():
         manager.store.setup(manager.store.setup_token(), 'fixture', 'local-fixture-password-123!')
         states = {
             'future': (time.time() + 3600, False, True, 'rate_limit', '[HTTP_429] synthetic wait'),
-            'manual': (None, True, True, 'rate_limit', '[RATE_LIMIT_WAIT_LIMIT] synthetic hold'),
+            'manual': (time.time() + 7200, True, True, 'rate_limit', '[RATE_LIMIT_WAIT_LIMIT] synthetic hold'),
             'expired': (time.time() - 60, False, True, 'rate_limit', '[HTTP_429] synthetic expired wait'),
             'denied': (None, False, True, 'source_error', '[HTTP_403] <img data-fixture-injected src=x onerror=alert(1)>'),
             'missing': (None, False, False, None, 'Synthetic interrupted worker'),

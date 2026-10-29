@@ -52,6 +52,7 @@ const path = require('node:path');
       await page.locator('#job-alert').screenshot({ path: path.join(output, `deadline-${width}.png`), animations: 'disabled' });
       await select('manual');
       assert.match(await page.locator('#job-alert-message').innerText(), /تكرار الاستكمال لا يرفع الحظر/);
+      assert.ok(await page.locator('#wait-countdown').isHidden());
       assert.equal(await page.locator('html').getAttribute('dir'), 'rtl');
       assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
       if (width === 375) await page.waitForFunction(() => document.getElementById('sidebar').getBoundingClientRect().left >= innerWidth - 1);

@@ -308,7 +308,7 @@
   }
   function updateCountdown() {
     const s = getStats(state.selectedJob);
-    const until = dateValue(s.wait_until);
+    const until = s.wait_unbounded === true ? null : dateValue(s.wait_until);
     const seconds = until ? Math.max(0, Math.ceil((until.getTime() - Date.now()) / 1000)) : 0;
     show("wait-countdown", seconds > 0);
     if (seconds > 0) text("wait-countdown", `${Math.floor(seconds / 3600) ? `${Math.floor(seconds / 3600)}:` : ""}${String(Math.floor(seconds / 60) % 60).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`);
