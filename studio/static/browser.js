@@ -2,7 +2,7 @@
 window.ShodanBrowser = (() => {
   const $ = id => document.getElementById(id);
   let ctx, job, activeJob, timer, busy=false, inputBusy=false, opening=false, queue=Promise.resolve(), generation=0, lastResult={};
-  const states={closed:'الجلسة مغلقة',awaiting_verification:'أكمل التحقق أو تسجيل الدخول، ثم افحص الصفحة.',browser_challenge:'لم يسمح Shodan بالوصول بعد. المهمة متوقفة ونتائجها محفوظة. فحص الصفحة لا يحل تحقق Cloudflare، وتكرار فتح الجلسة لا يضمن قبوله. يلزم ظهور نتائج صالحة قبل الاستكمال.',rate_limited:'قيّد Shodan عدد الطلبات (429). انتظر موعد الاستكمال المحفوظ؛ لا حاجة إلى تكرار الضغط على التحقق.',access_denied:'رفض Shodan الوصول. راجع الصفحة.',ready:'تم التحقق من صفحة نتائج صالحة؛ يمكنك الاستكمال.'};
+  const states={opening:'جارٍ فتح متصفح التحقق…',failed:'تعذّر فتح المتصفح؛ راجع سجل المهمة.',closed:'الجلسة مغلقة',awaiting_verification:'أكمل التحقق أو تسجيل الدخول، ثم افحص الصفحة.',browser_challenge:'لم يسمح Shodan بالوصول بعد. المهمة متوقفة ونتائجها محفوظة. فحص الصفحة لا يحل تحقق Cloudflare، وتكرار فتح الجلسة لا يضمن قبوله. يلزم ظهور نتائج صالحة قبل الاستكمال.',rate_limited:'قيّد Shodan عدد الطلبات (429). انتظر موعد الاستكمال المحفوظ؛ لا حاجة إلى تكرار الضغط على التحقق.',access_denied:'رفض Shodan الوصول. راجع الصفحة.',ready:'تم التحقق من صفحة نتائج صالحة؛ يمكنك الاستكمال.'};
   async function send(input) {return ctx.api(`/api/jobs/${activeJob}/browser`,{method:'POST',body:JSON.stringify(input)});}
   states.off_task_page='الصفحة الحالية ليست نتائج المهمة. بعد إتمام تسجيل الدخول اضغط «العودة إلى نتائج المهمة»، ثم «فحص الصفحة».';
   function controls() {
@@ -42,13 +42,28 @@ window.ShodanBrowser = (() => {
     catch(error){$('browser-error').textContent=error.message;}
     finally{opening=false;controls();render(job);schedule();}
   }
-  function render(value){job=value;$('job-browser-open').disabled=!job||job.mode!=='html'||job.network_mode==='direct'||!job.network_mode||!['paused','waiting_input','interrupted','failed'].includes(job.status)||opening;}
+  function render(value){
+    job=value;
+    const stopped=job&&['paused','waiting_input','interrupted','failed'].includes(job.status);
+    const recovery=job?.browser_recovery_attempt||{};
+    $('job-browser-open').disabled=!job||job.mode!=='html'||job.network_mode==='direct'||!job.network_mode||!stopped||opening||recovery.state==='opening';
+    $('job-browser-open').textContent=job?.browser_session_open?'عرض جلسة المتصفح':'فتح المتصفح التفاعلي';
+    $('job-browser-state').textContent=(states[recovery.state]||'')+(job?.browser_backend?' · '+job.browser_backend:'');
+    $('job-browser-policy').value=job?.settings?.browser_recovery||'manual';
+    $('job-browser-policy').disabled=!stopped||job.network_busy||job.browser_session_open||recovery.state==='opening';
+  }
   function init(context){
     ctx=context;$('job-browser-open').addEventListener('click',open);
+    $('job-browser-policy').addEventListener('change',async()=>{
+      const selected=job;
+      try{await ctx.api(`/api/jobs/${selected.id}/browser-policy`,{method:'POST',body:JSON.stringify({browser_recovery:$('job-browser-policy').value})});await ctx.refreshAll();}
+      catch(error){$('job-browser-state').textContent=error.message;render(selected);}
+    });
     $('browser-dialog').addEventListener('close',()=>{generation++;clearTimeout(timer);$('browser-text').value='';$('browser-frame').removeAttribute('src');});
     $('browser-frame').addEventListener('click',event=>{
       const rect=event.target.getBoundingClientRect();
-      action({action:'click',x:Math.min(1099,Math.max(0,Math.floor((event.clientX-rect.left)*1100/rect.width))),y:Math.min(759,Math.max(0,Math.floor((event.clientY-rect.top)*760/rect.height)))});
+      const width=lastResult.width||1100,height=lastResult.height||760;
+      action({action:'click',x:Math.min(width-1,Math.max(0,Math.floor((event.clientX-rect.left)*width/rect.width))),y:Math.min(height-1,Math.max(0,Math.floor((event.clientY-rect.top)*height/rect.height)))});
     });
     $('browser-frame').addEventListener('keydown',event=>{
       if(event.ctrlKey||event.altKey||event.metaKey||event.key==='Tab')return;

@@ -1996,6 +1996,9 @@ def connection_error(exc: Exception) -> SpiderError:
 
 
 def http_failure(code: int, headers: Message | None = None) -> SpiderError:
+    if code != 429 and headers is not None and headers.get('cf-mitigated', '').lower() == 'challenge':
+        return SpiderError(f"[HTTP_{code}] [BROWSER_CHALLENGE] Shodan requires interactive browser verification.",
+                           http_status=code, failure_kind='browser_challenge')
     if 300 <= code <= 399:
         return SpiderError(f"[HTTP_{code}] Redirect, possibly to login; redirects are not followed.", http_status=code)
     if code in (401, 403):
@@ -2042,7 +2045,7 @@ def fetch_html(url: str, timeout: float, opener: Any = None, ca_bundle: Path | N
     })
     try:
         with opener.open(request, timeout=timeout) as response:
-            if response.status != 200:
+            if response.status != 200 or response.headers.get('cf-mitigated', '').lower() == 'challenge':
                 raise http_failure(response.status, response.headers)
             if response.headers.get("Content-Encoding", "identity").lower() not in ("", "identity"):
                 raise SpiderError("[CONTENT_ENCODING] Unexpected compressed Python response.")
@@ -2100,7 +2103,7 @@ def fetch_html_curl(url: str, timeout: float, ca_bundle: Path | None = None,
                 headers = parse_response_headers(stream.read(65537))
         except (OSError, ValueError) as exc:
             raise SpiderError(f"[CURL_RESPONSE] Cannot read response headers: {safe_detail(exc)}") from None
-        if int(metadata[0]) != 200:
+        if int(metadata[0]) != 200 or headers.get('cf-mitigated', '').lower() == 'challenge':
             raise http_failure(int(metadata[0]), headers)
         if not headers.get("Content-Type"):
             headers["Content-Type"] = metadata[1] if len(metadata) > 1 else "application/octet-stream"

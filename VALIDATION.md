@@ -121,3 +121,18 @@ bash install-debian.sh --check
 ```
 
 ملف البصمات يخص ملفات حزمة المصدر كما تم تسليمها. لا يتضمن بيانات تشغيل أو مفاتيح أو قاعدة بيانات مستخدم.
+
+## Patchright recovery 1.6.0 — 2026-10-29
+
+Local full gate: 243 Python tests passed with zero skips; 20 Node tests passed.
+Installer checks, JavaScript syntax and git diff checks passed. Both native
+browser backends passed in disconnected namespaces. Patchright additionally
+proved persistent cookies after restart, malformed-facet rejection, private
+JSON-pipe lifecycle and no challenge reloads. The simulated Arabic interface
+passed keyboard/axe and overflow checks at 375/1280, with no page errors.
+
+Evidence is in `docs/patchright-evidence/`. Native lab and UI fixtures do not
+prove live Shodan acceptance. A deployment receipt records the production check
+separately. The originally selected task became cancelled during implementation;
+the user selected a separate test job and the original task's 566 IPs must remain
+unchanged.

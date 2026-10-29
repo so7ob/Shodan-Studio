@@ -107,7 +107,7 @@ class WorkerRecoveryTests(unittest.TestCase):
         with patch.object(DemoData,'fetch',autospec=True,side_effect=blocked) as fetch:
             code,events=self.run_capture()
         self.assertEqual(code,75);self.assertEqual(fetch.call_count,1)
-        self.assertEqual(events[-1]['input_reason'],'source_error')
+        self.assertEqual(events[-1]['input_reason'],'browser_challenge')
         self.assertEqual(self.checkpoint()['state']['requests_total'],1)
         self.assertEqual(self.checkpoint()['config']['mode'],'html')
 

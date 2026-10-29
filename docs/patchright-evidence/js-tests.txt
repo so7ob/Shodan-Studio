@@ -1,0 +1,28 @@
+✔ example 512 of estimated 782 displays 65% (2.820947ms)
+✔ no estimate is not presented as zero percent or 100% (0.249044ms)
+✔ completed zero-IP job can show 100% without fabricated totals (0.212145ms)
+✔ error condition with known count remains estimated (0.302788ms)
+✔ large numbers formatted safely (0.279098ms)
+✔ invalid percent is treated as unknown (0.182637ms)
+✔ rounding or malformed payload cannot display 100 before success (0.25775ms)
+✔ missing progress never falls back to a branch percentage (0.202273ms)
+✔ render creates accessible determinate progressbar (0.89165ms)
+✔ render unknown estimate as non-numeric status (0.469217ms)
+✔ compact list retains secondary branch counts and safely renders text (0.362815ms)
+✔ persisted future deadline survives a cloned/reloaded job and is explicit (2.919707ms)
+✔ expired deadline remains visible without promising acceptance or automatic resume (1.872225ms)
+✔ unbounded wait takes precedence even if an old deadline has elapsed (0.503834ms)
+✔ invalid deadlines never become an expired wait (0.506096ms)
+✔ countdown and guidance share validation with unbounded-hold precedence (0.35896ms)
+✔ missing checkpoint is not described as a saved restart point (0.215066ms)
+✔ access refusals explain manual review without claiming a retry solves access (0.385864ms)
+✔ technical markup stays a literal string for textContent rendering (0.223206ms)
+✔ view model does not mutate saved state or require browser/network globals (0.778905ms)
+ℹ tests 20
+ℹ suites 0
+ℹ pass 20
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 250.489755

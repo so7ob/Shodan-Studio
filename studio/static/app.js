@@ -546,7 +546,7 @@
       const key = fields.api_key.value.trim();
       const payload = {
         title: fields.title.value.trim(), query: fields.query.value.trim(), mode: fields.mode.value, priority: n("priority"),
-        settings: { transport: fields.transport.value, ip_version: fields.ip_version.value, strategy: fields.strategy.value,
+        settings: { browser_recovery: fields.browser_recovery.value, transport: fields.transport.value, ip_version: fields.ip_version.value, strategy: fields.strategy.value,
           split_facets: fields.split_facets.value.split(",").map((v) => v.trim()).filter(Boolean),
           max_requests: n("max_requests"), delay: n("delay"), timeout: n("timeout"),
           rate_limit_retries: n("rate_limit_retries"), retry_base_delay: n("retry_base_delay"), max_retry_wait: n("max_retry_wait"),

@@ -12,6 +12,7 @@ WorkingDirectory=/opt/shodan-studio/current
 ExecStart=/usr/bin/python3 -s -m studio.vpn_helper
 Environment=PYTHONUNBUFFERED=1
 Environment=PYTHONDONTWRITEBYTECODE=1
+EnvironmentFile=-/etc/default/shodan-studio-browser
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=90

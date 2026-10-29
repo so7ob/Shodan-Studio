@@ -19,6 +19,7 @@ def main():
     parser.add_argument('--premium', action='store_true')
     parser.add_argument('--source-denial', action='store_true')
     parser.add_argument('--interactive', action='store_true')
+    parser.add_argument('--automatic-browser', action='store_true')
     parser.add_argument('--adaptive', action='store_true')
     parser.add_argument('--port', type=int, default=8792)
     args = parser.parse_args()
@@ -47,6 +48,10 @@ def main():
             manager._browser_rpc=browser_rpc
             job=manager.create_job({'title':'Interactive browser fixture','query':'fixture','mode':'html','settings':{'demo':True},'network':{'network_mode':'preferred','preferred_vpn_profile':'1'*32}})
             store.update_job(job['id'],status='waiting_input',input_reason='source_error',error='[HTTP_403] [BROWSER_CHALLENGE] fixture')
+            if args.automatic_browser:
+                manager._browser_job=job['id']
+                store.update_job(job['id'],browser_session_enabled=True,browser_backend='patchright',
+                    browser_recovery_attempt={'state':'awaiting_verification'})
         if args.source_denial:
             from test_vpn import GOOD
             manager.vpn.provider.diagnostics = lambda scope: dict(GOOD, scope=scope,

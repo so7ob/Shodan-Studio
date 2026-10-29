@@ -1,0 +1,13 @@
+{
+  "provider": "simulated",
+  "autoSessionDoesNotOpenModal": true,
+  "attachedSession": true,
+  "explicitVerifiedResume": true,
+  "policyOptOut": true,
+  "rtlWidths": [
+    375,
+    1280
+  ],
+  "axeViolations": 0,
+  "errors": []
+}

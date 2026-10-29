@@ -46,3 +46,11 @@ country list without changing the queue/detail layout. Show cached-versus-gatewa
 catalog provenance, device registration and slot counts separately from verified
 tunnel status. Never preload or display subscription credentials. Premium country
 labels come from the account catalog and cannot be edited into a false location.
+
+## Patchright recovery controls — 1.6.0
+
+Keep the compact Arabic RTL controls and existing tokens. Place recovery status
+and the automatic/manual policy beside the interactive browser action. Opening a
+server session never opens a modal or moves focus. Verification and resume remain
+explicit actions; failures are visible in text. Use measured frame dimensions for
+pointer mapping. Check keyboard operation, overflow and axe at 375/1280.
