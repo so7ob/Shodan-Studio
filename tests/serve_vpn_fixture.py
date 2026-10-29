@@ -3,6 +3,7 @@ import argparse
 from pathlib import Path
 import sys
 import tempfile
+import time
 from wsgiref.simple_server import make_server
 
 sys.path[:0] = [str(Path(__file__).resolve().parents[1]), str(Path(__file__).resolve().parent)]
@@ -21,6 +22,7 @@ def main():
     parser.add_argument('--interactive', action='store_true')
     parser.add_argument('--automatic-browser', action='store_true')
     parser.add_argument('--adaptive', action='store_true')
+    parser.add_argument('--pacing', action='store_true')
     parser.add_argument('--port', type=int, default=8792)
     args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix='studio-browser-fixture-') as folder:
@@ -34,8 +36,18 @@ def main():
                 {'branches':[{'expected_records':80,'completed':True},{'expected_records':80,'completed':True}], 'planning_complete':True,'traversal_completed':True},
                 stats={'phase':'completed','requests':4,'requests_this_run':4,'ready_branches':2,'completed_branches':2,
                        'remaining_branches':0,'plan_known':True,'facet_probes':1,
-                       'last_partition':{'facet':'port','children':2,'estimated_requests':2}})
+                       'source_total_records':160,
+                       'last_partition':{'facet':'port','children':2,'raw_children':52,'estimated_requests':2}})
             store.update_job(job['id'],status='completed')
+            if args.pacing:
+                store.record_ip_progress(job['id'],[],
+                    {'branches':[{'expected_records':80,'completed':False},{'expected_records':80,'completed':False}],
+                     'planning_complete':False,'traversal_completed':False},
+                    stats={'phase':'partitioning','ready_branches':2,'completed_branches':0,'remaining_branches':2,
+                           'plan_known':True,'source_total_records':160,'facet_probes':1,
+                           'last_partition':{'facet':'port','children':2,'raw_children':52,'estimated_requests':2},
+                           'request_wait':{'reason':'request_delay','until':time.time()+180}})
+                store.update_job(job['id'],status='running')
         if args.interactive:
             state={'running':True,'backend':'patchright' if args.automatic_browser else 'chromium',
                    'state':'off_task_page','can_return_to_results':True,'http_status':200,'width':1100,'height':760}

@@ -117,13 +117,12 @@
         ]
       },
       "adaptive": {
-        "requests": 5,
+        "requests": 4,
         "branches": 2,
         "unique_ips": 160,
-        "chosen": "version",
+        "chosen": "port",
         "facet_requests": [
-          "port",
-          "version"
+          "port"
         ]
       },
       "identical_ip_sets": true

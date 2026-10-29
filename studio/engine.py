@@ -1709,6 +1709,24 @@ def build_url(query: str, facet: str) -> str:
     return ENDPOINT + "?" + urllib.parse.urlencode({"query": query, "facet": facet}, quote_via=urllib.parse.quote)
 
 
+def narrow_query_values(query: str, field: str, values: list[str]) -> str:
+    """Union validated buckets without widening any original restriction.
+
+    Shodan's comma-list syntax ORs values within one filter. Validate each
+    member with the same scope checks used for single-value branches first.
+    """
+    if not values:
+        raise ScopeConflict('[QUERY_SCOPE] Empty branch group.')
+    for value in values:
+        narrow_query(query, field, value)
+    term = field + ':' + ','.join(quote_value(value) for value in values)
+    positive = [entry for entry in scope_filters(query).get(field, []) if not entry[3]]
+    if positive:
+        start, end, _, _ = positive[0]
+        return query[:start] + term + query[end:]
+    return query + ' ' + term
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     raw_argv = list(sys.argv[1:] if argv is None else argv)
     parser = argparse.ArgumentParser(
@@ -2457,6 +2475,10 @@ class Crawler:
     def on_rate_limited(self, failure: BaseException, event: dict[str, Any]) -> None:
         """Worker hook after a fresh 429 has saved its pending request and deadline."""
 
+    def wait_for_request(self, duration: float, reason: str) -> None:
+        """Presentation hook; retain the injected sleeper and retry semantics."""
+        self.sleeper(duration)
+
     def _request_with_rate_limits(self, operation: Callable[[], Any], template: dict[str, Any],
                                   label: str, counter: str | None = None) -> tuple[Any, dict[str, Any]]:
         """Preserve request scope through automatic retries and explicit pauses."""
@@ -2481,7 +2503,7 @@ class Crawler:
                     self._pause_for_user("The saved waiting time exceeds the automatic budget.", event)
                     manual_wait_allowed = True
                 self.progress(f"Waiting {pending_wait:g}s before resuming the saved request (Ctrl+C to stop).")
-                self.sleeper(pending_wait)
+                self.wait_for_request(pending_wait, 'rate_limit')
                 self.report["retry_wait_seconds"] += pending_wait
             self.not_before_utc = None
             if manual_wait_allowed:
@@ -2491,7 +2513,7 @@ class Crawler:
             if self.last_finished is not None:
                 delay = self.args.delay - (self.clock() - self.last_finished)
                 if delay > 0:
-                    self.sleeper(delay)
+                    self.wait_for_request(delay, 'request_delay')
             if self.agent_pool is not None:
                 self.current_user_agent = self.agent_pool.next()
                 if getattr(self, "client", None) is not None:
@@ -2573,7 +2595,7 @@ class Crawler:
             self.progress(f"HTTP 429: waiting {wait:g}s before retry {retry_number + 1}/{self.args.rate_limit_retries} of the same request (Ctrl+C to stop).")
             started = self.clock()
             try:
-                self.sleeper(wait)
+                self.wait_for_request(wait, 'rate_limit')
             except KeyboardInterrupt:
                 elapsed = min(wait, max(0.0, self.clock() - started))
                 event.update(decision="interrupted", waited_seconds=elapsed)

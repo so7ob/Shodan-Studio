@@ -54,3 +54,12 @@ and the automatic/manual policy beside the interactive browser action. Opening a
 server session never opens a modal or moves focus. Verification and resume remain
 explicit actions; failures are visible in text. Use measured frame dimensions for
 pointer mapping. Check keyboard operation, overflow and axe at 375/1280.
+
+## Automatic planning and request pacing — Issue #23
+
+Keep the existing Arabic RTL dashboard. Show the reported source service total
+next to IP progress, explicitly separate from the distinct-IP estimate. Place a
+text countdown below progress; label ordinary request spacing separately from
+source rate-limit waits. Use a timer role without per-second live announcements,
+retain the existing colors and typography, and hide legacy facet ordering in
+adaptive mode. No new fonts, animations or layout system.

@@ -1,6 +1,6 @@
 # Adaptive request planning (Issue #6)
 
-Design: add an adaptive strategy for new jobs while preserving priority/tree
+Design: use an adaptive strategy for new jobs while preserving priority/tree
 checkpoints exactly. Start at the original query's IP facet. Collect each valid
 page immediately and stop when the returned row counts account for its total.
 A service-record count is not a distinct-IP count: even a large record total may
@@ -25,3 +25,34 @@ The plan is provisional while a pending scope might split. Reports retain
 candidate estimates, rejection reasons, selected facets and bounded probe counts.
 The heuristic minimizes observed cost; it cannot promise a global optimum from
 unseen facets or prove completeness of a changing external search index.
+
+## Automatic grouping and pacing (Issue #23)
+
+Complete facet snapshots are eligible even when their totals differ from an
+older parent probe. The comparison is recorded as `SNAPSHOT_COUNT_CHANGED`;
+missing bucket counts or a mismatch within the same facet page still rejects
+that candidate. Small buckets are packed deterministically with best-fit
+decreasing into groups of at most 100 estimated service records before scoring.
+Each member passes the original scope checks. The query uses Shodan's documented
+[comma-list OR filters](https://book.shodan.io/getting-started/query-syntax/),
+with independently quoted/escaped values and the original exclusions retained.
+A group can split on the same facet again if its observed size grows.
+
+The adaptive UI chooses candidates automatically and hides legacy ordering.
+Explicit CLI candidate subsets remain supported, with automatic probe ordering.
+Reports expose raw bucket counts beside grouped children. The root's reported
+service count is displayed separately from estimated unique-IP progress; it is
+never substituted for the unique-IP denominator.
+
+The worker emits an absolute `stats.request_wait.until` deadline and a reason
+(`request_delay` or `rate_limit`) before waiting, and clears it in a finally block.
+The UI derives the remaining time every second, including after reload, and hides
+ordinary pacing for paused or finished jobs. Persisted Retry-After deadlines and
+unbounded holds retain precedence and their existing retry behavior.
+
+Offline regression using anonymized bucket sizes from the reported query:
+53 port buckets previously scored 60 extraction requests. Grouping and accepting
+the complete 580-record ASN snapshot against the older 581-record parent selects
+four initial ASN branches after three facet probes, with eight estimated downstream
+requests. One branch still needs direct verification and possibly further splits;
+these are estimates, not a live extraction result or a promised final branch count.

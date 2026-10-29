@@ -16,3 +16,7 @@
 /* Keep paused-job guidance readable beside its icon on narrow screens. */
 .job-alert details{margin-top:8px}.job-alert summary{cursor:pointer}
 @media(max-width:760px){.job-alert>div{flex:1 1 calc(100% - 36px)}}
+
+/* Keep pacing readable beside the progress summary, without live announcements. */
+#wait-countdown{color:var(--cyan);font-size:13px;font-weight:600;font-variant-numeric:tabular-nums}
+#detail-source-total{color:var(--text);font-size:12px;line-height:1.9}

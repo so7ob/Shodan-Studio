@@ -49,6 +49,21 @@
     }
     return { kind, title, message, checkpoint, deadlineMs, technicalError: String(raw) };
   }
-  if (typeof module === "object" && module.exports) module.exports = { viewModel, validatedDeadlineMs };
-  else root.ShodanJobGuidance = { viewModel, validatedDeadlineMs };
+  function countdown(job = {}, now = Date.now()) {
+    const stats = job.stats || {};
+    if (stats.wait_unbounded || ["completed", "completed_warnings", "cancelled", "failed"].includes(job.status)) return null;
+    let deadline = validatedDeadlineMs(stats), reason = "rate_limit";
+    if (!(deadline > now)) {
+      const wait = stats.request_wait;
+      if (job.status !== "running" || !wait || !["request_delay", "rate_limit"].includes(wait.reason)) return null;
+      deadline = validatedDeadlineMs({ wait_until: wait.until }); reason = wait.reason;
+    }
+    if (!(deadline > now)) return null;
+    const seconds = Math.ceil((deadline - now) / 1000);
+    const clock = `${Math.floor(seconds / 3600) ? `${Math.floor(seconds / 3600)}:` : ""}${String(Math.floor(seconds / 60) % 60).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
+    const label = reason === "request_delay" ? "فاصل الطلبات — الطلب التالي بعد" : "مهلة تقييد الطلبات — المتبقي";
+    return { seconds, reason, text: `${label} \u2066${clock}\u2069` };
+  }
+  if (typeof module === "object" && module.exports) module.exports = { viewModel, validatedDeadlineMs, countdown };
+  else root.ShodanJobGuidance = { viewModel, validatedDeadlineMs, countdown };
 })(typeof globalThis !== "undefined" ? globalThis : this);

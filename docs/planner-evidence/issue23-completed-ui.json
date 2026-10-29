@@ -1,0 +1,15 @@
+{
+  "fixture": true,
+  "newJobDefault": "adaptive",
+  "legacySelectable": true,
+  "decisionVisible": true,
+  "sourceTotalVisible": true,
+  "pacingCountdown": false,
+  "automaticCandidates": true,
+  "rtlWidths": [
+    375,
+    1280
+  ],
+  "axeViolations": 0,
+  "errors": []
+}

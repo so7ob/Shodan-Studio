@@ -31,7 +31,7 @@
     let heading = 'تقدّم استخراج عناوين IP';
     let headline, description;
     if (total === null || displayedPct === null) {
-      headline = `${n(extracted)} عنوان IP مستخرج — الإجمالي غير معروف بعد`;
+      headline = `${n(extracted)} عنوان IP مستخرج — الإجمالي الفريد قيد التقدير`;
       description = planned
         ? 'توجد فروع غير محسوبة؛ لا يمكن تحديد نسبة موثوقة حاليًا.'
         : 'جارٍ تخطيط الفروع وتحديد حجم العمل المتبقي.';
@@ -82,7 +82,7 @@
     const fill = node('div', 'ip-progress__fill');
     if (data.percent === null) {
       track.setAttribute('role', 'status');
-      track.setAttribute('aria-label', 'الإجمالي غير معروف بعد');
+      track.setAttribute('aria-label', 'الإجمالي الفريد قيد التقدير');
       track.classList.add('ip-progress__track--unknown');
       fill.style.width = '32%';
     } else {
