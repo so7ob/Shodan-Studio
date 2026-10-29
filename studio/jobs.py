@@ -79,6 +79,13 @@ class JobManager:
                 raise ValueError("توجد خدمة أخرى تستخدم مجلد البيانات نفسه.") from None
             self.store.recover_interrupted()
             self._restore_ip_progress()
+            self.store.requests.interrupt()
+            for job in self.store.list_jobs():
+                try:
+                    self.store.requests.backfill(job['id'], self._path(job['id']))
+                except (ValueError, OSError, KeyError, TypeError, AttributeError):
+                    self.store.append_event(job['id'],{'kind':'warning','level':'warning',
+                        'message':'تعذر استعادة بعض تفاصيل الطلبات القديمة؛ بقيت البيانات الأصلية محفوظة.'})
             with contextlib.suppress(Exception):
                 browser = self.vpn.provider.get_status().get('browser', {})
                 if browser.get('running') and self.store.get_job(browser.get('job_id')):
@@ -130,6 +137,7 @@ class JobManager:
                   "network_health": "unknown", "last_network_error": None, "last_failover_at": None,
                   "failover_count": 0, **job}
         result["ip_progress"] = progress_from_job(job)
+        result['latest_request'] = self.store.requests.latest(job['id'])
         result.pop("_ip_progress_inputs", None)
         result.pop("_ip_progress_stored", None)
         with self._lock:
@@ -691,7 +699,14 @@ class JobManager:
                 event = self._redact(event)
                 kind = event.get("kind")
                 if kind == "ip_batch":
-                    self.store.record_ip_progress(job_id, event.get("ips", []))
+                    self.store.record_ip_progress(job_id, event.get("ips", []),request_id=event.get('request_id'))
+                    continue
+                if kind == 'request':
+                    stored=self.store.requests.save(job_id,event['request'])
+                    self.store.append_event(job_id,{'kind':'request','request':stored})
+                    continue
+                if kind == 'request_values':
+                    self.store.requests.values(job_id,event['request_id'],event['offset'],event['rows'])
                     continue
                 with self._lock:
                     current = self._get(job_id)
@@ -725,6 +740,7 @@ class JobManager:
                         event["ip_progress"] = progress_from_job(updated)
                 self.store.append_event(job_id, event)
             process.wait()
+            self.store.requests.interrupt(job_id)
             if final is None:
                 current = self._get(job_id)
                 state = "cancelled" if current["status"] == "cancel_requested" else "interrupted"
@@ -742,6 +758,7 @@ class JobManager:
                         os.killpg(process.pid, signal.SIGKILL)
                     process.wait()
             process.stdout.close()
+            self.store.requests.interrupt(job_id)
             with self._lock:
                 self._process = None
                 current = self._get(job_id)
@@ -884,6 +901,7 @@ class JobManager:
                 self.store.update_job(job["id"], status="waiting_input" if missing else "paused", stats=stats,
                                       error="أدخل مفتاح API للاستكمال." if missing else None, imported=True)
                 self._restore_job_progress(self._get(job["id"]))
+                self.store.requests.backfill(job['id'],path)
                 self.store.append_event(job["id"], {"kind": "log", "level": "info", "message": "استُوردت نقطة الاستكمال؛ راجع المصدر ثم اختر استكمال."})
                 return self.get_job(job["id"])
             except (Exception, SystemExit):

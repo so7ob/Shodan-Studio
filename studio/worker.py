@@ -170,7 +170,7 @@ class StudioCrawler(engine.Crawler):
             result=rpc('browser_fetch',job_id=self.args.studio_browser_job,url=url)
             if self.report.get('pages'):
                 self.report['pages'][-1].update(user_agent=result.get('user_agent', 'native browser'),
-                    browser_backend=result.get('backend', 'browser'), transport='browser')
+                    browser_backend=result.get('backend', 'browser'), transport='browser',http_status=result.get('http_status'))
             if result.get('http_status')==429:
                 delay=result.get('retry_after')
                 if delay=='unbounded':delay=float('inf')
@@ -294,7 +294,7 @@ class StudioCrawler(engine.Crawler):
         # Bound IPC messages, including a large restored checkpoint. These
         # batches are consumed into SQLite, never copied into the event log.
         for offset in range(0, len(addresses), 1000):
-            emit("ip_batch", ips=addresses[offset:offset + 1000])
+            emit("ip_batch", ips=addresses[offset:offset + 1000],request_id=getattr(self,'_history_request_id',None))
         self._reported_ips.update(new)
         emit("progress", stats=self.stats(), ip_progress_inputs=crawler_progress_inputs(self))
 
@@ -302,7 +302,10 @@ class StudioCrawler(engine.Crawler):
         self.check_control()
         if " | " in text:
             self._current_query = text.split(" | ", 1)[1]
-        emit("log", level="info", message=text)
+        request_id=None
+        if text.startswith('[') and self.report.get('pages'):
+            request_id=self.report['pages'][-1].get('request_id')
+        emit("log", level="info", message=text, request_id=request_id)
         self.snapshot(force=True)
 
     def warning(self, code, message, query, facet):
@@ -340,6 +343,17 @@ class StudioCrawler(engine.Crawler):
         self.check_control()
         self._current_query = query
         return super().read_page(query, facet, expected)
+
+    def on_request(self, entry, rows=None):
+        from .request_history import summary, batches
+        self._history_request_id=entry['request_id']
+        # Publish accumulated IPs first so the manager's persisted total agrees
+        # with the result. Values travel separately, never in the noisy event log.
+        self.snapshot(force=entry.get('new_unique_ips') is not None)
+        emit('request', request=summary(entry,entry.get('origin','live')))
+        if rows is not None:
+            for offset, batch in batches(rows):
+                emit('request_values',request_id=entry['request_id'],offset=offset,rows=batch)
 
     def collect_ips(self, page):
         super().collect_ips(page)

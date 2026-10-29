@@ -1,0 +1,18 @@
+{
+  "fixture": true,
+  "rtlWidths": [
+    375,
+    1280
+  ],
+  "attempts": 70,
+  "facetValues": 250,
+  "expandedStateStable": true,
+  "focusStable": true,
+  "reload": true,
+  "rawEvents": true,
+  "unsafeMarkupRenderedAsText": true,
+  "axeViolations": 0,
+  "manualScreenReader": false,
+  "shodanRequests": 0,
+  "errors": []
+}

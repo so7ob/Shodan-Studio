@@ -89,6 +89,8 @@ class Store:
         migrate(self.path)
         from .browser_recovery import migrate as migrate_browser_recovery
         migrate_browser_recovery(self)
+        from .request_history import RequestHistory
+        self.requests = RequestHistory(self)
         if self.setup_required():
             self._ensure_setup_token()
 
@@ -263,7 +265,7 @@ class Store:
             con.commit()
         return None
 
-    def record_ip_progress(self, job_id: str, ips=(), inputs=None, **changes) -> dict:
+    def record_ip_progress(self, job_id: str, ips=(), inputs=None, request_id=None, **changes) -> dict:
         """Commit deduplicated IPs, cached COUNT and metric inputs together.
 
         The composite primary key handles replay/resume. Dashboard polls read
@@ -276,8 +278,15 @@ class Store:
             if row is None:
                 raise KeyError(job_id)
             job = json.loads(row[0])
-            con.executemany("INSERT OR IGNORE INTO job_ips(job_id,ip) VALUES(?,?)",
-                            ((job_id, ip) for ip in addresses))
+            inserted=con.executemany("INSERT OR IGNORE INTO job_ips(job_id,ip) VALUES(?,?)",
+                            ((job_id, ip) for ip in addresses)).rowcount
+            if request_id:
+                attempt=con.execute("SELECT document,accepted_ips FROM request_history WHERE job_id=? AND request_id=? AND origin IN ('live','cache')",(job_id,request_id)).fetchone()
+                if attempt:
+                    document=json.loads(attempt['document']);added=attempt['accepted_ips']+inserted
+                    document['new_unique_ips']=added
+                    con.execute('UPDATE request_history SET document=?,accepted_ips=?,attribution_seen=1 WHERE job_id=? AND request_id=?',
+                                (_json(document),added,job_id,request_id))
             job.update(changes)
             if inputs is not None:
                 job["_ip_progress_inputs"] = inputs

@@ -231,6 +231,7 @@
   }
   async function selectJob(id, scroll = true) {
     if (id !== state.selectedId) {
+      ShodanRequests.select(id);
       state.selectedId = id; state.selectedJob = null; state.lastEvent = 0; state.events = [];
       state.results = { items: [], total: 0, offset: 0, limit: 100, q: "" };
       state.resultsCount = -1; state.actionSignature = ""; state.settingsSignature = "";
@@ -251,6 +252,7 @@
     if (id !== state.selectedId) return;
     state.selectedJob = data.job || data;
     renderDetail(state.selectedJob);
+    await ShodanRequests.refresh(id,state.tab==='events');
     await loadEvents(id);
     if (state.tab === "results") {
       const count = safeNum(getStats(state.selectedJob).unique_ips);
@@ -261,6 +263,7 @@
     return `<button class="button small ${css}" data-action="${action}"${disabled ? " disabled" : ""}>${icon(iconName)}${label}</button>`;
   }
   function renderDetail(job) {
+    ShodanRequests.renderLatest(job);
     ShodanVPN.renderJob(job);
     const s = getStats(job);
     text("detail-title", jobTitle(job)); text("detail-query", job.query || "");
@@ -371,6 +374,7 @@
       const stamp = dateValue(event.at || event.timestamp);
       const time = stamp ? stamp.toLocaleTimeString("en-GB") : "—";
       let message = event.message;
+      if (!message && kind === 'request') message = ShodanRequests.formatMessage(event.request || {});
       if (!message && kind === "state") message = STATUS[event.status]?.[0] || event.status;
       if (!message && kind === "progress") {
         const s = event.stats || {};
@@ -421,6 +425,7 @@
       show(`pane-${button.dataset.tab}`, selected);
     });
     if (tab === "results") loadResults();
+    if (tab === 'events') ShodanRequests.refresh(state.selectedId,true);
     if (tab === "events" && $("log-autoscroll").checked) $("event-log").scrollTop = $("event-log").scrollHeight;
   }
   function openDialog(id) {
@@ -634,6 +639,7 @@
     document.addEventListener("keydown", (event) => { if (event.key === "Escape") closeSidebar(); });
     window.addEventListener("online", () => refreshAll());
   }
+  ShodanRequests.init({api,copyText});
   ShodanAccounts.init({api,toast,closeSidebar,refreshAll});
   ShodanVPN.init({api, toast, closeSidebar, refreshAll, openResume, runAction, currentJob: id => state.jobs.find(j => j.id === id)});
   bindEvents(); loadSession();

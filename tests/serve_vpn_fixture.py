@@ -26,6 +26,7 @@ def main():
     parser.add_argument('--adaptive', action='store_true')
     parser.add_argument('--pacing', action='store_true')
     parser.add_argument('--pacing-progress', action='store_true')
+    parser.add_argument('--request-history', action='store_true')
     parser.add_argument('--port', type=int, default=8792)
     args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix='studio-browser-fixture-') as folder:
@@ -33,6 +34,30 @@ def main():
         store.setup(store.setup_token(), 'acceptance', 'local-browser-fixture-123!')
         manager = JobManager(folder, store=store, autostart=False, demo=True)
         manager.vpn = VPNManager(store, BrowserPremiumProvider() if args.premium else FakeProvider())
+        if args.request_history:
+            job=manager.create_job({'title':'سجل الاستعلامات التجريبي','query':'fixture','mode':'html','settings':{'demo':True,'delay':18}})
+            store.update_job(job['id'],status='running')
+            for n in range(1,71):
+                entry={'request_id':f'{n:032x}','query':'http.component:"php" country:"EG" port:"443"',
+                       'facet':'port','source':'html','number':n,'session_number':1,
+                       'status':'success' if n<70 else 'requesting','origin':'live',
+                       'started_at':'2026-10-29T20:00:00+00:00','total_records':579 if n<70 else None,
+                       'row_count':250 if n<70 else None}
+                store.requests.save(job['id'],entry)
+            latest=entry
+            raw_get=manager.get_job
+            ready=[None]
+            def history_job(job_id):
+                if ready[0] is None: ready[0]=time.monotonic()+4
+                if latest['status']=='requesting' and time.monotonic()>=ready[0]:
+                    latest.update(status='success',total_records=579,row_count=250,duration_ms=1500)
+                    store.requests.save(job_id,latest)
+                    from studio.request_history import batches
+                    for offset,values in batches([{'value':str(i),'label':'<img src=x onerror=alert(1)>' if i==1 else str(i),'count':i+1} for i in range(250)]):
+                        store.requests.values(job_id,latest['request_id'],offset,values)
+                    store.append_event(job_id,{'kind':'request','request':latest})
+                return raw_get(job_id)
+            manager.get_job=history_job
         if args.adaptive:
             job=manager.create_job({'title':'Adaptive 160 fixture','query':'fixture','mode':'html','settings':{'demo':True}})
             store.record_ip_progress(job['id'],[f'192.0.2.{i+1}' for i in range(160)],
