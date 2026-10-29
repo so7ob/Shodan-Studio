@@ -2,10 +2,24 @@ import unittest
 from pathlib import Path
 import sys
 
-from studio.ip_progress import calculate_ip_progress, attach_ip_progress
+from studio.ip_progress import calculate_ip_progress, attach_ip_progress, progress_from_job
 
 
 class IPProgressTests(unittest.TestCase):
+    def test_source_reference_does_not_fabricate_a_distinct_ip_estimate(self):
+        job={'status':'running','stats':{'unique_ips':100,'source_total_records':579},
+             '_ip_progress_inputs':{'planning_complete':False,'branches':[]}}
+        value=progress_from_job(job)
+        self.assertEqual(value['source_record_reference'],{'total_records':579,'progress_percent':17})
+        self.assertIsNone(value['progress_percent'])
+        self.assertIsNone(value['estimated_total_ips'])
+        self.assertEqual(job['stats']['unique_ips'],100)
+        for total in [None,False,0,-1,'579',1.5,9007199254740992]:
+            job['stats']['source_total_records']=total
+            self.assertIsNone(progress_from_job(job)['source_record_reference'])
+        job['stats']['source_total_records']=80
+        self.assertEqual(progress_from_job(job)['source_record_reference']['progress_percent'],99)
+
     def make(self, **changes):
         params = dict(extracted_unique_ips=512, branches=[
             {"expected_records": 270, "processed_records": 0, "status": "pending"},

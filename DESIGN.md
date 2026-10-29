@@ -16,6 +16,12 @@ LTR branch ratios within RTL text. Animation does not interpolate layout width.
 The table's absolute accessible label is contained by its existing scroller;
 mobile detail actions wrap below the heading.
 
+Issue #29: retain the same tokens and layout. Show a numeric estimated reference
+against the source record total while unique-IP planning is incomplete; explicitly
+label the two units and keep branch counts secondary. Countdown text includes the
+configured task interval, uses server time, and stays in place between requests.
+Preserve non-live timer announcements and numeric progressbar ARIA semantics.
+
 2026-10-24 audit: verified actual authenticated page at 1280 and 375 CSS pixels,
 keyboard entry to details, no document horizontal overflow, matching list/detail
 65% bars for synthetic 512/782 and 16/77, and zero axe violations in the changed

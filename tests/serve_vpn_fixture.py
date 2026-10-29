@@ -25,6 +25,7 @@ def main():
     parser.add_argument('--automatic-browser', action='store_true')
     parser.add_argument('--adaptive', action='store_true')
     parser.add_argument('--pacing', action='store_true')
+    parser.add_argument('--pacing-progress', action='store_true')
     parser.add_argument('--port', type=int, default=8792)
     args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix='studio-browser-fixture-') as folder:
@@ -42,6 +43,7 @@ def main():
                        'last_partition':{'facet':'port','children':2,'raw_children':52,'estimated_requests':2}})
             store.update_job(job['id'],status='completed')
             if args.pacing:
+                store.update_job(job['id'],settings={**job['settings'],'delay':180})
                 store.record_ip_progress(job['id'],[],
                     {'branches':[{'expected_records':80,'completed':False},{'expected_records':80,'completed':False}],
                      'planning_complete':False,'traversal_completed':False},
@@ -50,6 +52,25 @@ def main():
                            'last_partition':{'facet':'port','children':2,'raw_children':52,'estimated_requests':2},
                            'request_wait':{'reason':'request_delay','until':time.time()+180}})
                 store.update_job(job['id'],status='running')
+        if args.pacing_progress:
+            job=manager.create_job({'title':'Pacing and progress fixture','query':'synthetic progress fixture',
+                                    'mode':'html','settings':{'demo':True,'delay':18}})
+            store.record_ip_progress(job['id'],[f'192.0.2.{i+1}' for i in range(100)],
+                {'branches':[{'expected_records':None,'completed':False}],
+                 'planning_complete':False,'traversal_completed':False},
+                stats={'phase':'partitioning','ready_branches':1,'completed_branches':0,'remaining_branches':1,
+                       'plan_known':True,'source_total_records':579,'requests':4,'requests_this_run':4})
+            store.update_job(job['id'],status='running')
+            original_get_job=manager.get_job
+            deadline=[None]
+            def pacing_job(job_id):
+                if deadline[0] is None: deadline[0]=time.time()+18
+                current=store.get_job(job_id)
+                wait={'reason':'request_delay','until':deadline[0],'duration':18,'configured_delay':18}
+                if time.time()>deadline[0]+1: wait=None
+                store.update_job(job_id,stats={**current['stats'],'request_wait':wait})
+                return original_get_job(job_id)
+            manager.get_job=pacing_job
         if args.interactive or args.accounts or args.empty_facet:
             state={'running':True,'backend':'patchright' if args.automatic_browser else 'chromium',
                    'state':'off_task_page','can_return_to_results':True,'http_status':200,'width':1100,'height':760}

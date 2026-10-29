@@ -42,13 +42,25 @@ The adaptive UI chooses candidates automatically and hides legacy ordering.
 Explicit CLI candidate subsets remain supported, with automatic probe ordering.
 Reports expose raw bucket counts beside grouped children. The root's reported
 service count is displayed separately from estimated unique-IP progress; it is
-never substituted for the unique-IP denominator.
+never substituted for the unique-IP denominator. While that denominator is unknown,
+the UI uses a clearly labeled provisional comparison with source records, such as
+100 unique IPs / 579 expected records = 17% estimated. It prefers the unique-IP
+estimate when available, preserves the conservative API fields, and reserves 100%
+for successful completion of the planned work.
 
 The worker emits an absolute `stats.request_wait.until` deadline and a reason
 (`request_delay` or `rate_limit`) before waiting, and clears it in a finally block.
 The UI derives the remaining time every second, including after reload, and hides
 ordinary pacing for paused or finished jobs. Persisted Retry-After deadlines and
 unbounded holds retain precedence and their existing retry behavior.
+
+Issue #29 synchronizes that countdown with `X-Studio-Server-Time` and elapsed
+`performance.now()` time, so a skewed browser clock does not change the wait.
+The label includes the job's configured delay. It reaches zero while the wait is
+still active, then retains the configured interval between requests instead of
+disappearing. Reloading uses the existing deadline; it does not start a new wait.
+Worker progress snapshot time counts toward the same monotonic deadline. Normal
+request pacing is bounded by the job setting; Retry-After remains a separate wait.
 
 Offline regression using anonymized bucket sizes from the reported query:
 53 port buckets previously scored 60 extraction requests. Grouping and accepting

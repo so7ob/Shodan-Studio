@@ -315,6 +315,15 @@ def progress_from_job(job: dict) -> dict:
         job_status=status,
     )
     result["denominator_reason"] = inputs.get("denominator_reason", "planning_incomplete")
+    # A source record count is a useful provisional reference, not a distinct-IP
+    # estimate. Keep the conservative fields above intact for existing clients.
+    source_total = job.get("stats", {}).get("source_total_records")
+    result["source_record_reference"] = None
+    if type(source_total) is int and 0 < source_total <= 9007199254740991:
+        result["source_record_reference"] = {
+            "total_records": source_total,
+            "progress_percent": min(99, int(100 * result["extracted_unique_ips"] / source_total + 0.5)),
+        }
     return result
 
 

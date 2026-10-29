@@ -3,6 +3,7 @@
 
 (() => {
   const $ = (id) => document.getElementById(id);
+  const serverClock = ShodanJobGuidance.createServerClock();
   const state = {
     session: null, jobs: [], selectedId: null, selectedJob: null,
     view: "all", tab: "overview", lastEvent: 0, events: [],
@@ -88,8 +89,10 @@
       if (state.session?.csrf_token) headers["X-CSRF-Token"] = state.session.csrf_token;
     }
     let response;
+    const requestedAt = performance.now();
     try {
       response = await fetch(path, { credentials: "same-origin", cache: "no-store", ...options, headers });
+      serverClock.observe(response.headers.get("X-Studio-Server-Time"), requestedAt);
     } catch (_) {
       const err = new Error("تعذّر الاتصال بالخادم. تحقق من الشبكة وعنوان خادم Debian.");
       err.network = true;
@@ -299,7 +302,7 @@
     const alert = attentionStatuses.has(job.status) || job.status === "failed" || job.status === "completed_warnings";
     show("job-alert", alert);
     if (alert) {
-      const guidance = ShodanJobGuidance.viewModel(job);
+      const guidance = ShodanJobGuidance.viewModel(job, serverClock.now());
       text("job-alert-title", job.status === "completed_warnings" ? "انتهى التنفيذ مع ملاحظات على التغطية" : guidance.title);
       text("job-alert-message", job.status === "completed_warnings" ? "يمكنك تنزيل النتائج والتقرير لفهم الفروع والتحذيرات المسجلة." : guidance.message);
       text("job-checkpoint-status", guidance.checkpoint);
@@ -312,7 +315,7 @@
     $("download-txt").href = jobURL(job.id, "/download?format=txt");
   }
   function updateCountdown() {
-    const timer = ShodanJobGuidance.countdown(state.selectedJob || {});
+    const timer = ShodanJobGuidance.countdown(state.selectedJob || {}, serverClock.now());
     show("wait-countdown", !!timer);
     text("wait-countdown", timer?.text || "");
   }

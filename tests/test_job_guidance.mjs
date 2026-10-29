@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-const { viewModel, validatedDeadlineMs } = createRequire(import.meta.url)('../studio/static/job_guidance.js');
+const { viewModel, validatedDeadlineMs, countdown, createServerClock } = createRequire(import.meta.url)('../studio/static/job_guidance.js');
 const now = 1700000000000;
 const format = value => new Date(value).toISOString();
 const job = { status: 'waiting_input', has_checkpoint: true, input_reason: 'rate_limit' };
@@ -88,10 +88,57 @@ test('request delay counts down from an absolute deadline across refreshes', () 
   const reloaded = JSON.parse(JSON.stringify(value));
   assert.equal(countdown(reloaded, now+1100).seconds, 29);
   assert.match(countdown(reloaded, now+1100).text, /فاصل الطلبات.*00:29/);
-  assert.equal(countdown(value, now+30000), null);
+  assert.equal(countdown(value, now+30000).seconds, 0);
+  assert.match(countdown(value, now+30000).text, /حان موعد الطلب التالي.*00:00/);
   for (const status of ['paused','pause_requested','cancel_requested','interrupted','waiting_input','completed','cancelled']) {
     assert.equal(countdown({ ...value, status }, now), null);
   }
+});
+
+test('server clock ignores browser skew, wall clock changes and page reloads', () => {
+  const value = {status:'running',settings:{delay:18},stats:{request_wait:{reason:'request_delay',until:now/1000+18}}};
+  for (const skew of [-3600000,-5000,5000,3600000]) {
+    let mono=100,wall=now+skew;
+    const clock=createServerClock(()=>mono,()=>wall);
+    assert.equal(clock.observe(String(now/1000),90),true);
+    assert.equal(countdown(value,clock.now()).seconds,18);
+    mono+=4000;wall+=7200000;
+    assert.equal(countdown(value,clock.now()).seconds,14);
+    const reloaded=createServerClock(()=>mono,()=>wall);
+    assert.equal(reloaded.observe(String(now/1000+4),mono),true);
+    assert.equal(countdown(JSON.parse(JSON.stringify(value)),reloaded.now()).seconds,14);
+  }
+});
+
+test('clock rejects invalid, stale and slow response samples', () => {
+  let mono=100;
+  const clock=createServerClock(()=>mono,()=>now+3600000);
+  for (const value of [null,'','0','NaN','-1','1e100',String(1e18)]) assert.equal(clock.observe(value,90),false);
+  assert.equal(clock.observe(String(now/1000),90),true);
+  mono=200;
+  assert.equal(clock.observe(String(now/1000-10),80),false);
+  assert.equal(clock.now(),now+100);
+  assert.equal(clock.observe(String((now+50)/1000),150),true);
+  assert.equal(clock.now(),now+100);
+  mono=4000;
+  assert.equal(clock.observe(String(now/1000),200),false);
+  assert.equal(clock.now(),now+3900);
+});
+
+test('configured interval stays visible between waits and never resets a countdown', () => {
+  const value={status:'running',settings:{delay:18},stats:{request_wait:{reason:'request_delay',until:now/1000+18}}};
+  assert.match(countdown(value,now).text,/\(18 ثانية\).*00:18/);
+  assert.equal(countdown(value,now-5000).seconds,18);
+  assert.equal(countdown(value,now+16000).seconds,2);
+  assert.equal(countdown(value,now+20000).seconds,0);
+  value.stats.request_wait=null;
+  assert.deepEqual(countdown(value,now+20000),{reason:'configured_delay',seconds:null,text:'فاصل الطلبات (18 ثانية)'});
+  value.stats.request_wait={reason:'request_delay',until:now/1000+38};
+  assert.equal(countdown(value,now+21000).seconds,17);
+  value.stats.wait_until=now/1000+120;
+  assert.equal(countdown(value,now).seconds,120);
+  assert.equal(countdown(value,now).reason,'rate_limit');
+  assert.equal(countdown({...value,status:'cancelled'},now),null);
 });
 test('rate limit deadline takes precedence and is distinct from ordinary pacing', () => {
   const { countdown } = createRequire(import.meta.url)('../studio/static/job_guidance.js');

@@ -202,21 +202,26 @@ class StudioCrawler(engine.Crawler):
             self.stop_reason = self.stop_reason or action
             raise engine.PauseRequested("[CANCELLED] أُلغيت المهمة مع الاحتفاظ بما جُمع." if self.stop_reason == "cancel" else "[PAUSED] حُفظ التقدم؛ يمكنك الاستكمال من لوحة التحكم.")
 
-    def interruptible_sleep(self, duration):
-        end = time.monotonic() + duration
+    def interruptible_sleep(self, duration, *, deadline=None):
+        end = time.monotonic() + duration if deadline is None else deadline
         while True:
             self.check_control()
             remaining = end - time.monotonic()
             if remaining <= 0:
                 return
             self.snapshot()
-            time.sleep(min(0.25, remaining))
+            remaining = end - time.monotonic()
+            if remaining > 0:
+                time.sleep(min(0.25, remaining))
 
     def wait_for_request(self, duration, reason):
-        self._request_wait = {'reason': reason, 'until': time.time() + duration}
+        # Publishing progress consumes part of this wait, not extra pacing time.
+        deadline = time.monotonic() + duration
+        self._request_wait = {'reason': reason, 'until': time.time() + duration,
+                              'duration': duration, 'configured_delay': self.args.delay}
         try:
             self.snapshot(force=True)
-            self.interruptible_sleep(duration)
+            self.interruptible_sleep(duration, deadline=deadline)
         finally:
             self._request_wait = None
             self.snapshot(force=True)

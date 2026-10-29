@@ -121,6 +121,14 @@ class ServerTests(unittest.TestCase):
     def job(self):
         return self.manager.create_job({"query": 'test country:"ZZ"'})
 
+    def test_responses_expose_server_clock_without_changing_json_contract(self):
+        with patch('studio.server.time.time',return_value=1700000000.125):
+            status,data,headers=self.client.request('GET','/health')
+        self.assertEqual(status,200)
+        self.assertEqual(data,{'ok':True,'version':__version__})
+        self.assertEqual(headers['X-Studio-Server-Time'],'1700000000.125000')
+        self.assertIn('no-store',headers['Cache-Control'])
+
     def test_anonymous_session_has_csrf_and_safe_cookie(self):
         client = Client(self.app)
         status, data, headers = client.request("GET", "/api/session")

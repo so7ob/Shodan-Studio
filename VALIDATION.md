@@ -149,3 +149,27 @@ ownership error (corrected before retry as the application user), and a transien
 VPN health hold. These held runs sent zero extraction requests. The final run
 passed the unchanged health checks. Receipts retain each observation separately.
 GitHub CI 40902906990 passed on the deployed implementation commit.
+
+## Task pacing and estimated progress — Issue #29, 2026-10-29
+
+Local full gate: 311 Python tests passed in 152.444 seconds, zero skips; 28 Node
+tests passed. Installer/helper/browser checks, JavaScript syntax and diff checks
+passed. Worker tests include cancellation cleanup and persistence overhead within
+the published delay. Clock tests cover browser skew, reloads, changing wall time,
+stale/slow responses, network jitter, and independent Retry-After waits.
+
+The authenticated loopback UI fixture used a task interval of 18 seconds and
+100 persisted unique IPs against 579 source records during incomplete planning.
+Both list and detail displayed 17% estimated. With the browser clock five seconds
+behind, the countdown started at 18; later clock jumps of +1 hour and -2 hours and
+a reload did not reset it. Recorded samples reached 13, 12, ... 1, 0, then retained
+the configured interval without hiding the timer line. Keyboard entry, RTL at
+375/1280, horizontal overflow checks and axe all passed, with zero page errors.
+Manual screen-reader testing was not performed.
+
+Evidence: `docs/pacing-progress-evidence/issue29-ui.json` and the two screenshots.
+Reproduce with `python3 tests/serve_vpn_fixture.py --pacing-progress --port 8799`,
+then `node tests/browser_pacing_progress.cjs` with Playwright/axe available and
+`STUDIO_TEST_CHROMIUM` pointing to the test Chromium binary. The fixture uses a
+temporary database and sends no Shodan queries. This records local validation,
+not a deployment or live source acceptance result.
