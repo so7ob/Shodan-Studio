@@ -70,3 +70,28 @@ test('view model does not mutate saved state or require browser/network globals'
   assert.equal(input.stats.wait_until, now / 1000 + 1);
   assert.equal(viewModel().kind, 'paused');
 });
+
+test('request delay counts down from an absolute deadline across refreshes', () => {
+  const { countdown } = createRequire(import.meta.url)('../studio/static/job_guidance.js');
+  const value = { status: 'running', stats: { request_wait: { reason: 'request_delay', until: now/1000+30 } } };
+  assert.equal(countdown(value, now).seconds, 30);
+  const reloaded = JSON.parse(JSON.stringify(value));
+  assert.equal(countdown(reloaded, now+1100).seconds, 29);
+  assert.match(countdown(reloaded, now+1100).text, /فاصل الطلبات.*00:29/);
+  assert.equal(countdown(value, now+30000), null);
+  for (const status of ['paused','pause_requested','cancel_requested','interrupted','waiting_input','completed','cancelled']) {
+    assert.equal(countdown({ ...value, status }, now), null);
+  }
+});
+test('rate limit deadline takes precedence and is distinct from ordinary pacing', () => {
+  const { countdown } = createRequire(import.meta.url)('../studio/static/job_guidance.js');
+  const value = { status: 'running', stats: { wait_until: now/1000+60, request_wait: { reason:'request_delay', until:now/1000+30 } } };
+  assert.equal(countdown(value, now).reason, 'rate_limit');
+  assert.equal(countdown(value, now).seconds, 60);
+  assert.match(countdown(value, now).text, /مهلة تقييد الطلبات/);
+  assert.equal(countdown({ ...value, stats:{ ...value.stats, wait_unbounded:true } }, now), null);
+  assert.equal(countdown({ ...value, status:'completed_warnings' }, now), null);
+  for (const until of [null,NaN,Infinity,1e100,'1700000000',-1]) {
+    assert.equal(countdown({status:'running',stats:{request_wait:{reason:'request_delay',until}}}, now), null);
+  }
+});

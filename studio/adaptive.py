@@ -5,10 +5,42 @@ from dataclasses import replace
 import heapq
 
 from .engine import (FACET_LIMIT, FacetPage, PlanBranch, PriorityPlanError,
-                     _plan_branch_valid, _plan_count, _plan_text, scope_filters)
+                     _plan_branch_valid, _plan_count, _plan_text, scope_filters,
+                     narrow_query_values, comparable)
 
 DEFAULT_FACETS = ('port', 'version', 'asn', 'country', 'product', 'org', 'os', 'city')
 FACETS = frozenset(DEFAULT_FACETS)
+
+
+def pack_children(branch, facet, children):
+    """Best-fit decreasing packs complete small buckets into <=100 records.
+
+    Large buckets remain separate for recursive planning. Grouped filters can
+    be split again if the source grows beyond the extraction limit later.
+    """
+    groups = []
+    for child in sorted(children, key=lambda c: (-c.count, c.query)):
+        candidates = [group for group in groups if child.count <= FACET_LIMIT and
+                      sum(c.count for c in group) + child.count <= FACET_LIMIT and
+                      len(','.join(c.path[-1][1] for c in [*group, child])) <= 512]
+        if candidates:
+            max(candidates, key=lambda g: sum(c.count for c in g)).append(child)
+        else:
+            groups.append([child])
+    packed = []
+    for group in groups:
+        if len(group) == 1:
+            packed.append(group[0])
+            continue
+        values = [child.path[-1][1] for child in group]
+        query = narrow_query_values(branch.query, facet, values)
+        if len(query) > 100000:
+            packed.extend(group)
+            continue
+        packed.append(PlanBranch(query,
+                                 sum(c.count for c in group), branch.used_facets,
+                                 branch.path + ((facet, ','.join(values)),), branch.depth + 1))
+    return packed
 
 
 def complete_ip_page(page):
@@ -33,9 +65,12 @@ class AdaptivePlanner:
     it is not a mandatory traversal. No candidate is probed twice in a decision.
     """
     def __init__(self, read_page, narrow_branch, facets=DEFAULT_FACETS, event=None):
-        self.facets = tuple(facets)
-        if not self.facets or len(set(self.facets)) != len(self.facets) or any(f not in FACETS for f in self.facets):
+        facets = tuple(facets)
+        if not facets or len(set(facets)) != len(facets) or any(f not in FACETS for f in facets):
             raise PriorityPlanError('[PLAN_CONFIG] Invalid adaptive facet candidates.')
+        # Candidate selection is automatic; legacy/custom input ordering is not
+        # an instruction to traverse that order in adaptive mode.
+        self.facets = tuple(f for f in DEFAULT_FACETS if f in facets)
         self.read_page, self.narrow_branch = read_page, narrow_branch
         self.event = event or (lambda *args, **kwargs: None)
         self.probes = 0
@@ -67,10 +102,11 @@ class AdaptivePlanner:
             clean = not page.warnings
             for row in page.rows:
                 value = _plan_text(row.value, 512);count = _plan_count(row.count)
-                if value in values:
+                identity = comparable(facet, value)
+                if identity in values:
                     clean = False
                     continue
-                values.add(value)
+                values.add(identity)
                 if count == 0:
                     continue
                 query = self.narrow_branch(branch.query, facet, row)
@@ -84,23 +120,32 @@ class AdaptivePlanner:
             reason = None
             if not children or not clean or total is None or any(c.count is None for c in children) or accounted != total:
                 reason = 'incomplete_partition'
-            elif branch.count is not None and total != branch.count:
-                reason = 'snapshot_count_changed'
             elif len(children) == 1:
                 reason = 'no_reduction'
-            elif len(children) > remaining_nodes:
-                reason = 'node_limit'
             if reason:
                 if reason == 'no_reduction':constant.add(facet)
                 self.event('CANDIDATE_REJECTED', branch, facet, reason=reason, children=len(children))
+                continue
+            # A complete newer snapshot is useful even when its total differs
+            # from the parent probe. Coverage within this page stays mandatory.
+            if branch.count is not None and total != branch.count:
+                self.event('SNAPSHOT_COUNT_CHANGED', branch, facet,
+                           previous_total=branch.count, observed_total=total)
+            raw_children = len(children)
+            children = pack_children(branch, facet, children)
+            if any(child.query == branch.query for child in children):
+                self.event('CANDIDATE_REJECTED', branch, facet, reason='no_reduction', children=len(children))
+                continue
+            if len(children) > remaining_nodes:
+                self.event('CANDIDATE_REJECTED', branch, facet, reason='node_limit', children=len(children))
                 continue
             oversized = [c for c in children if c.count > FACET_LIMIT]
             cost = sum(((c.count+FACET_LIMIT-1)//FACET_LIMIT) + (2 if c.count > FACET_LIMIT else 0) for c in children)
             score = (cost, len(oversized), len(children), max(c.count for c in children))
             self.event('CANDIDATE_EVALUATED', branch, facet, estimated_requests=cost,
-                       children=len(children), oversized_children=len(oversized))
+                       children=len(children), raw_children=raw_children, oversized_children=len(oversized))
             if best is None or score < best[0]:
-                best = score, facet, children
+                best = score, facet, children, raw_children
             # This is a lower bound within the record-count cost model only;
             # service counts cannot prove the optimal distinct-IP partition.
             lower_bound = max(2, ((total+FACET_LIMIT-1)//FACET_LIMIT))
@@ -108,9 +153,9 @@ class AdaptivePlanner:
                 break
         if best is None:
             return None
-        score, facet, children = best
+        score, facet, children, raw_children = best
         self.event('PARTITION_CHOSEN', branch, facet, estimated_requests=score[0],
-                   children=len(children), oversized_children=score[1])
+                   children=len(children), raw_children=raw_children, oversized_children=score[1])
         return [replace(child, used_facets=tuple(dict.fromkeys((*child.used_facets, *sorted(constant)))))
                 for child in children]
 
@@ -166,6 +211,8 @@ def run_adaptive(crawler):
         c.progress('[ADAPTIVE] فحص IP قبل أي تقسيم | ' + branch.query)
         # Cache/429/checkpoint/source restrictions remain in the original reader.
         page = c.read_page(branch.query, 'ip', branch.count)
+        if not branch.path:
+            plan['source_total_records'] = page.total
         c.collect_ips(page)
         entry.update(expected_count=page.total, new_unique_ips=len(c.accepted)-before)
         if c.args.mode == 'api' or complete_ip_page(page):

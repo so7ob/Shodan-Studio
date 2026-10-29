@@ -58,7 +58,7 @@ test('rounding or malformed payload cannot display 100 before success', () => {
 test('missing progress never falls back to a branch percentage', () => {
   const vm = viewModel({ completed_leaves: 77, total_leaves: 77, planning_complete: true });
   assert.equal(vm.percent, null);
-  assert.match(vm.headline, /الإجمالي غير معروف بعد/);
+  assert.match(vm.headline, /الإجمالي الفريد قيد التقدير/);
 });
 
 class FakeElement {

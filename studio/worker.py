@@ -151,6 +151,7 @@ class StudioCrawler(engine.Crawler):
         self._finalizing = False
         self._initializing = True
         self._current_query = args.effective_query
+        self._request_wait = None
         super().__init__(args, fetcher=self.demo_data.fetch if demo else self.browser_fetch if getattr(args,'studio_browser_job',None) else None,
                          sleeper=self.interruptible_sleep, continue_prompt=self.needs_input)
         if args.mode == "api":
@@ -208,6 +209,15 @@ class StudioCrawler(engine.Crawler):
             self.snapshot()
             time.sleep(min(0.25, remaining))
 
+    def wait_for_request(self, duration, reason):
+        self._request_wait = {'reason': reason, 'until': time.time() + duration}
+        try:
+            self.snapshot(force=True)
+            self.interruptible_sleep(duration)
+        finally:
+            self._request_wait = None
+            self.snapshot(force=True)
+
     def needs_input(self, message):
         self.input_reason = "rate_limit"
         emit("input_required", level="warning", message=message,
@@ -257,10 +267,12 @@ class StudioCrawler(engine.Crawler):
             "current_query": self._current_query, "source": self.args.mode,
             "warnings": len(self.report["warnings"]), "wait_until": self.not_before_utc,
             "wait_unbounded": self.wait_unbounded,
+            "request_wait": self._request_wait,
             "cache_hits": self.report.get("cache_hits", 0), "visited": self.report.get("visited", {}),
             "session_number": self.session_number, "demo": self.demo_data is not None,
             "planning_strategy": self.args.strategy, "facet_probes": plan.get("facet_probes", 0) if known else 0,
             "last_partition": plan.get("last_decision") if known else None,
+            "source_total_records": plan.get("source_total_records") if known else None,
             "traversal_completed": self.report.get("traversal_completed", False),
         }
 

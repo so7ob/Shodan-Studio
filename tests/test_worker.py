@@ -170,5 +170,37 @@ class WorkerRecoveryTests(unittest.TestCase):
         self.assertEqual(request.call_count, 1)
 
 
+
+
+class RequestPacingTests(unittest.TestCase):
+    def test_worker_emits_deadline_before_sleep_and_clears_it_on_cancel(self):
+        from studio.worker import StudioCrawler, build_args
+        with tempfile.TemporaryDirectory() as folder:
+            job_dir=Path(folder)
+            job={'id':'a'*32,'query':'fixture','mode':'html','settings':{'strategy':'adaptive','delay':30,'demo':True}}
+            crawler=StudioCrawler(build_args(job_dir,job,None),job_dir,demo=True)
+            snapshots=[]
+            with patch('studio.worker.emit',side_effect=lambda kind,**fields: snapshots.append((kind,fields))), patch('studio.worker.time.time',return_value=1700000000):
+                def cancel(_):
+                    job_dir.joinpath('control.json').write_text('{"action":"cancel"}')
+                with patch('studio.worker.time.sleep',side_effect=cancel):
+                    with self.assertRaises(engine.PauseRequested):crawler.wait_for_request(30,'request_delay')
+            states=[fields['stats']['request_wait'] for kind,fields in snapshots if kind=='progress']
+            self.assertEqual(states[0],{'reason':'request_delay','until':1700000030})
+            self.assertIsNone(states[-1])
+            self.assertIsNone(crawler.stats()['request_wait'])
+
+    def test_engine_labels_normal_request_pacing_without_changing_its_duration(self):
+        from test_adaptive import Dataset
+        with tempfile.TemporaryDirectory() as folder:
+            args=engine.parse_args(['--query','fixture','--mode','html','--delay','30','--output',str(Path(folder)/'ips.txt')])
+            crawler=engine.Crawler(args,fetcher=Dataset().fetch,clock=lambda:100,sleeper=lambda _:None)
+            crawler.last_finished=90
+            waits=[]
+            with contextlib.redirect_stdout(io.StringIO()),contextlib.redirect_stderr(io.StringIO()),patch.object(crawler,'wait_for_request',side_effect=lambda duration,reason:waits.append((duration,reason))):
+                crawler.read_page('fixture','ip',None)
+            self.assertEqual(waits,[(20,'request_delay')])
+
+
 if __name__ == "__main__":
     unittest.main()

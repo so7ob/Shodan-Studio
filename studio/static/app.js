@@ -269,7 +269,11 @@
     const adaptive = job.settings?.strategy === "adaptive";
     show("detail-planner", adaptive);
     const decision = s.last_partition;
-    text("detail-planner", decision ? `اختار المخطط ${decision.facet}: ${fmt(decision.children)} فروع، نحو ${fmt(decision.estimated_requests)} طلبات استخراج. فحوص التقسيم: ${fmt(s.facet_probes)}.` : "يفحص IP مباشرة، ويقارن كلفة التقسيم فقط عند الحاجة. قد تتغير الخطة مع النتائج.");
+    text("detail-planner", decision ? `اختار المخطط ${decision.facet}: ${fmt(decision.children)} فروع، نحو ${fmt(decision.estimated_requests)} طلبات استخراج. ${decision.raw_children > decision.children ? `جُمعت ${fmt(decision.raw_children)} قيمة في ${fmt(decision.children)} فروع. ` : ""}فحوص التقسيم: ${fmt(s.facet_probes)}.` : "يفحص IP مباشرة، ويقارن كلفة التقسيم فقط عند الحاجة. قد تتغير الخطة مع النتائج.");
+    const sourceTotal = s.source_total_records;
+    const sourceKnown = Number.isSafeInteger(sourceTotal) && sourceTotal >= 0;
+    show("detail-source-total", sourceKnown);
+    text("detail-source-total", sourceKnown ? `إجمالي سجلات Shodan المعلن: ${fmt(sourceTotal)}. قد تتغيّر الأعداد أثناء التنفيذ؛ قد تتكرر عناوين IP بين السجلات.` : "");
     ShodanIPProgress.updateFromJob($("detail-ip-progress"), job);
     text("detail-current-query", s.current_query || job.query || "—");
     text("stat-completed", s.plan_known ? `${fmt(s.completed_branches)} / ${fmt(s.ready_branches)}` : "—");
@@ -307,19 +311,18 @@
     $("download-txt").href = jobURL(job.id, "/download?format=txt");
   }
   function updateCountdown() {
-    const s = getStats(state.selectedJob);
-    const until = ShodanJobGuidance.validatedDeadlineMs(s);
-    const seconds = until !== null ? Math.max(0, Math.ceil((until - Date.now()) / 1000)) : 0;
-    show("wait-countdown", seconds > 0);
-    if (seconds > 0) text("wait-countdown", `${Math.floor(seconds / 3600) ? `${Math.floor(seconds / 3600)}:` : ""}${String(Math.floor(seconds / 60) % 60).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`);
+    const timer = ShodanJobGuidance.countdown(state.selectedJob || {});
+    show("wait-countdown", !!timer);
+    text("wait-countdown", timer?.text || "");
   }
+
   function renderSettings(job) {
     const s = job.settings || {};
     const entries = [
       ["المصدر المحدد", sourceText(job.mode)], ["الاستراتيجية", s.strategy === "adaptive" ? "تقليل الاستعلامات · Adaptive" : s.strategy === "tree" ? "Tree" : "Priority"],
       ["عميل الاتصال", s.transport || "curl"], ["نوع العناوين", s.ip_version === "all" ? "IPv4 + IPv6" : `IPv${s.ip_version || "4"}`],
       ["حد الطلبات للجولة", fmt(s.max_requests ?? 500)], ["فاصل الطلبات", `${s.delay ?? 2} s`],
-      [s.strategy === "adaptive" ? "مرشحو التقسيم" : "التقسيم بالترتيب", Array.isArray(s.split_facets) ? s.split_facets.join(" → ") : s.split_facets || "asn → port → version → product"],
+      ["اختيار التقسيم", s.strategy === "adaptive" ? "تلقائي بحسب كلفة الطلبات والفروع" : Array.isArray(s.split_facets) ? s.split_facets.join(" → ") : s.split_facets || "asn → port → version → product"],
       ["عند تعذّر API", s.api_fallback === "stop" ? "التوقف" : "محاولة HTML"],
       ["أولوية الطابور", String(job.priority ?? 0)], ["تاريخ الإنشاء", dateText(job.created_at)],
     ];
@@ -428,6 +431,9 @@
   function updatePlannerFields(resetCandidates = false) {
     const fields = $("create-form").elements;
     const adaptive = fields.strategy.value === "adaptive";
+    show("split-facets-field", !adaptive);
+    show("automatic-planner-help", adaptive);
+    fields.split_facets.disabled = adaptive;
     fields.always_asn.disabled = adaptive;
     if (adaptive) fields.always_asn.checked = false;
     if (resetCandidates) fields.split_facets.value = adaptive ? "port,version,asn,country,product,org,os,city" : "asn,port,version,product";
@@ -547,7 +553,7 @@
       const payload = {
         title: fields.title.value.trim(), query: fields.query.value.trim(), mode: fields.mode.value, priority: n("priority"),
         settings: { browser_recovery: fields.browser_recovery.value, transport: fields.transport.value, ip_version: fields.ip_version.value, strategy: fields.strategy.value,
-          split_facets: fields.split_facets.value.split(",").map((v) => v.trim()).filter(Boolean),
+          split_facets: fields.strategy.value === "adaptive" ? ["port","version","asn","country","product","org","os","city"] : fields.split_facets.value.split(",").map((v) => v.trim()).filter(Boolean),
           max_requests: n("max_requests"), delay: n("delay"), timeout: n("timeout"),
           rate_limit_retries: n("rate_limit_retries"), retry_base_delay: n("retry_base_delay"), max_retry_wait: n("max_retry_wait"),
           always_asn: fields.always_asn.checked, rotate_user_agents: fields.rotate_user_agents.checked,

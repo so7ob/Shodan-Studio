@@ -83,13 +83,92 @@ class AdaptiveTests(unittest.TestCase):
                 data=Dataset(size,unique=unique);report=self.run_crawler(self.crawler(data))
                 self.assertEqual(len(data.calls),1);self.assertEqual(len(report['ips']),unique or size)
                 self.assertEqual(report['plan']['facet_probes'],0)
-    def test_version_is_chosen_over_nonreducing_or_fragmented_ports(self):
+    def test_version_handles_constant_ports_and_fragmented_ports_are_packed(self):
         for layout in ('version','fragmented'):
             with self.subTest(layout=layout):
                 self.root.joinpath('checkpoint.json').unlink(missing_ok=True)
                 data=Dataset(layout=layout);report=self.run_crawler(self.crawler(data))
-                self.assertEqual(report['plan']['last_decision']['facet'],'version')
-                self.assertEqual((len(data.calls),len(report['ips'])),(5,160))
+                self.assertEqual(report['plan']['last_decision']['facet'],'port' if layout == 'fragmented' else 'version')
+                self.assertEqual((len(data.calls),len(report['ips'])),(4 if layout == 'fragmented' else 5,160))
+                self.assertEqual(len(report['plan']['extraction_order']),2)
+
+    def test_snapshot_drift_keeps_complete_cheaper_partition(self):
+        # Anonymized bucket sizes from the reported 581-record query. No IPs,
+        # account data or live source requests are used in this regression.
+        sizes = {
+            'port': [289,191,17,6,6,5,5,4,3,3,3,3,3,2,2,2] + [1]*37,
+            'asn': [300,82,59,30,24,22,11,7,6,6,5,5,5,3,3,3,2,2,2,1,1,1],
+        }
+        events = []
+        def read(query, facet, expected):
+            counts = sizes.get(facet, [])
+            return engine.FacetPage(facet, [engine.FacetRow(str(1000+i), n, '') for i,n in enumerate(counts)], sum(counts), [], False)
+        planner = AdaptivePlanner(read, lambda q,f,r: engine.narrow_query(q,f,r.value), event=lambda code,b,f,**kw: events.append((code,f,kw)))
+        children = planner.choose(engine.PlanBranch('http.component:"php" country:"EG"',581),1000)
+        self.assertEqual(len(children),4)
+        chosen = next(e for e in events if e[0]=='PARTITION_CHOSEN')
+        self.assertEqual(chosen[1],'asn')
+        self.assertEqual(chosen[2]['estimated_requests'],8)
+        self.assertEqual(sum(c.count for c in children),580)
+        self.assertTrue(any(code=='SNAPSHOT_COUNT_CHANGED' for code,_,_ in events))
+        self.assertEqual(planner.probes,3)
+
+    def test_packed_scope_keeps_original_union_and_exclusions(self):
+        data=Dataset(layout='fragmented')
+        query='fixture country:"DE","FR" port:1000,1001,1002,1003 -port:9999'
+        report=self.run_crawler(self.crawler(data,query=query))
+        self.assertEqual(len(report['ips']),16)
+        # Exercise grouping independently of the direct-IP shortcut.
+        from studio.adaptive import pack_children
+        branch=engine.PlanBranch(query,160)
+        children=[engine.PlanBranch(engine.narrow_query(query,'port',v),40,('port',),(('port',v),),1) for v in ('1000','1001','1002','1003')]
+        packed=pack_children(branch,'port',children)
+        self.assertEqual(len(packed),2)
+        returned=[]
+        for child in packed:
+            self.assertIn('country:"DE","FR"',child.query)
+            self.assertIn('-port:9999',child.query)
+            returned.extend(engine.scope_filters(child.query)['port'][0][2])
+            self.assertNotIn('port',child.used_facets)
+        self.assertCountEqual(returned,['1000','1001','1002','1003'])
+        with self.assertRaises(engine.ScopeConflict):engine.narrow_query_values(query,'port',['1000','9999'])
+        with self.assertRaises(engine.ScopeConflict):engine.narrow_query_values(query,'port',['1000','8080'])
+
+    def test_grouped_values_are_quoted_and_round_trip(self):
+        values=['New York','a,b','a"b','a\\b','القاهرة']
+        query=engine.narrow_query_values('fixture -country:FR','city',values)
+        self.assertEqual(engine.scope_filters(query)['city'][0][2],values)
+        self.assertIn('-country:FR',query)
+
+    def test_packed_checkpoint_reuses_completed_group(self):
+        data=Dataset(layout='fragmented')
+        with self.assertRaises(engine.SpiderError):self.run_crawler(self.crawler(data,max_requests=3))
+        previous=set(data.calls)
+        resumed=Dataset(layout='fragmented')
+        args=engine.parse_args(['--resume',str(self.root/'checkpoint.json'),'--max-requests','100','--delay','0'])
+        report=self.run_crawler(engine.Crawler(args,fetcher=resumed.fetch,sleeper=lambda _:None))
+        self.assertEqual(len(report['ips']),160)
+        self.assertEqual(len(resumed.calls),1)
+        self.assertFalse(previous & set(resumed.calls))
+
+    def test_growing_group_can_split_the_same_facet_again(self):
+        class Changed(Dataset):
+            def fetch(self,url):
+                result=super().fetch(url)
+                if self.calls[-1]==('fixture','port'):
+                    for row in self.records:
+                        if int(row['port']) >= 1045:row['port']='1000'
+                return result
+        data=Changed(layout='fragmented');report=self.run_crawler(self.crawler(data))
+        self.assertEqual(len(report['ips']),160)
+        selected=[e['facet'] for e in report['plan']['events'] if e['code']=='PARTITION_CHOSEN']
+        self.assertEqual(selected,['port','port'])
+        self.assertEqual(report['plan']['fallback_branches'],0)
+
+    def test_source_total_survives_into_worker_stats(self):
+        data=Dataset();c=self.crawler(data)
+        self.run_crawler(c)
+        self.assertEqual(c.report['plan']['source_total_records'],160)
     def test_country_can_be_terminal_without_city(self):
         data=Dataset(layout='country');report=self.run_crawler(self.crawler(data))
         self.assertEqual(report['plan']['last_decision']['facet'],'country')
@@ -122,6 +201,19 @@ class AdaptiveTests(unittest.TestCase):
         self.assertEqual(len(report['plan']['extraction_order']),1)
         self.assertEqual(report['plan']['fallback_branches'],1)
         self.assertEqual(len(report['ips']),100)
+
+    def test_node_budget_applies_after_packing_small_buckets(self):
+        data=Dataset(layout='fragmented')
+        report=self.run_crawler(self.crawler(data,extra=['--max-plan-nodes','3']))
+        self.assertEqual(len(report['plan']['extraction_order']),2)
+        self.assertEqual(len(report['ips']),160)
+        self.assertEqual(report['plan']['fallback_branches'],0)
+
+    def test_adaptive_chooses_automatically_despite_legacy_candidate_order(self):
+        data=Dataset()
+        report=self.run_crawler(self.crawler(data,extra=['--split-facets','city,os,org,product,country,asn,version,port']))
+        self.assertEqual(len(data.calls),4)
+        self.assertEqual(report['plan']['last_decision']['facet'],'port')
     def test_unknown_root_total_does_not_mistake_top_100_for_completion(self):
         class Unknown(Dataset):
             def fetch(self,url):
