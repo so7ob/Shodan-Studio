@@ -1,5 +1,27 @@
 # Shodan Studio: IP progress adaptation
 
+## Target repository and enrichment jobs — Issue #33
+
+Keep the existing Arabic RTL operations dashboard: dark, precise, compact and
+legible. Reuse its fonts, `--bg`, `--panel`, `--text`, `--muted`, `--line`,
+`--cyan` and monospace figures. The inventory uses a horizontal numeric summary,
+labelled filters, direct-labelled distributions, and a paged evidence table.
+Its distinguishing behavior is one IP with its complete discovery trail, while
+discovery time, enrichment time and upstream observation time stay explicit.
+
+Native inputs, meters and dialogs carry the interaction. The existing create,
+detail, network, browser and resume controls serve enrichment jobs. Their progress
+counts processed targets and presents outcomes separately. Background refresh
+retains selection/focus; errors are announced, ordinary refreshes are not.
+IP/query text is LTR, source text is escaped, and mobile tables scroll inside
+their containers. No new fonts, framework, images, decorative motion or theme.
+
+Audit: rendered at 375/1280, with keyboard navigation, stable focus and selection,
+and zero axe violations in the inventory and target/enrichment/runtime dialogs.
+The operational layout fits the existing dense data tool; the audit score is 9/10.
+Manual screen-reader testing was not performed. Machine-readable evidence and
+screenshots are under `docs/target-repository-evidence/`.
+
 Issue #31 adds request history within the existing Arabic RTL dashboard. A compact
 current/latest request card sits beside progress and pacing; the execution log
 defaults to expandable request rows with a separate all-events view. Keep current

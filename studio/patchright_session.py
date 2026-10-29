@@ -14,7 +14,7 @@ import struct
 import subprocess
 import sys
 
-from .browser_session import Session, allowed_url, facet_url, same_facet, browser_page_failure, LIMIT, KEYS
+from .browser_session import Session, allowed_url, resource_url as facet_url, same_facet, browser_page_failure, LIMIT, KEYS
 from .engine import parse_retry_after, http_failure
 from email.message import Message
 

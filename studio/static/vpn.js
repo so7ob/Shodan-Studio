@@ -57,6 +57,7 @@ window.ShodanVPN = (() => {
       max_failovers:Number($(`${prefix}-max`).value)};
   }
   function navigate(next) {
+    if(next)window.ShodanTargets?.workspace();
     view = next;
     $('workspace-view').hidden = !!next;
     $('vpn-view').hidden = next !== 'vpn';

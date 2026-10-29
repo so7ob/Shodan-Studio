@@ -1,5 +1,36 @@
 # Shodan Studio 1.5.0 — architecture
 
+## Cross-job inventory and enrichment — Issue #33
+
+`targets.py` owns additive SQLite inventory, discovery evidence, immutable host
+snapshots, current service metadata, automatic claims and enrichment item state.
+Inventory evidence has no cascading job ownership: it survives job deletion.
+IP identity includes the real/demo dataset. Discovery filters correlate task,
+query, source and time within the same observation. Lists use SQL pagination and
+exports use one bounded read snapshot; dashboard polling never contacts Shodan.
+
+Jobs have `kind=extraction|enrichment` (legacy default: extraction). Enrichment
+shares the scheduler, worker process entrypoint, controls, pacing/rate-limit
+implementation, request history, VPN helper lease, accounts and interactive
+browser. Its adapter reads validated Shodan host pages or the host API and stores
+allowlisted metadata rather than raw banners. The browser resource validator
+accepts canonical host URLs as well as the existing facet URLs; verification
+must parse the exact requested resource. Enrichment preserves a separate source
+policy while the existing `mode` reports the active source.
+
+The manager snapshots selected targets to a private, owned manifest at launch.
+Automatic jobs inherit origin-task settings and accept additional targets only
+before their first claim. Enrichment checkpoints persist item outcomes, metadata
+and source wait deadlines before IPC; replay uses the same request identity.
+Extraction records already received API host metadata in a private sidecar for
+crash recovery. Existing extraction checkpoints retain their format; enrichment
+checkpoints are explicitly discriminated and imported paused.
+
+Optional persistent enrichment API credentials use the existing account cipher
+and private key file, with ciphertext in a separate table. They are absent from
+job documents, events, checkpoints, exports and argv. Core HTML operation retains
+the standard-library-only dependency boundary. See `docs/TARGET_REPOSITORY_AR.md`.
+
 This release is a self-hosted, single-user application for Debian 12 and a trusted
 local network or an SSH tunnel. It uses Python's standard library, SQLite and a
 buildless Arabic browser interface. It is not packaged as a publicly exposed,

@@ -30,6 +30,9 @@ def migrate(store):
 
 
 def pending_url(job, path):
+    if job.get('kind') == 'enrichment':
+        from .enrichment import pending_url as host_pending_url
+        return host_pending_url(job, path)
     checkpoint = path / 'checkpoint.json'
     if checkpoint.exists():
         # build_args validates checkpoint paths/scope/config; saved URLs are not authority.

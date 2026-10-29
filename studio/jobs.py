@@ -21,7 +21,7 @@ import urllib.parse
 
 from . import engine
 from .config import JobValidationError, settings_from, validate_job, validate_key, text
-from .store import Store, utc_now
+from .store import Store, utc_now, _json
 from .worker import atomic_text
 from .ip_progress import crawler_progress_inputs, progress_from_job
 from .vpn import NON_FAILOVER_ERRORS, VPNManager
@@ -41,6 +41,8 @@ class JobManager:
         self.vpn = VPNManager(self.store)
         from .shodan_accounts import ShodanAccounts
         self.shodan_accounts = ShodanAccounts(self.store)
+        from .enrichment import EnrichmentSettings
+        self.enrichment_settings = EnrichmentSettings(self.store, self.shodan_accounts)
         self.jobs_dir = self.data_dir / "jobs"
         if self.jobs_dir.is_symlink():
             raise ValueError("مجلد المهام لا يقبل الروابط الرمزية.")
@@ -78,14 +80,20 @@ class JobManager:
                 self._ownership = None
                 raise ValueError("توجد خدمة أخرى تستخدم مجلد البيانات نفسه.") from None
             self.store.recover_interrupted()
-            self._restore_ip_progress()
+            restored_jobs = self._restore_ip_progress()
             self.store.requests.interrupt()
-            for job in self.store.list_jobs():
+            for job in restored_jobs:
                 try:
                     self.store.requests.backfill(job['id'], self._path(job['id']))
                 except (ValueError, OSError, KeyError, TypeError, AttributeError):
                     self.store.append_event(job['id'],{'kind':'warning','level':'warning',
                         'message':'تعذر استعادة بعض تفاصيل الطلبات القديمة؛ بقيت البيانات الأصلية محفوظة.'})
+                try:
+                    self.store.targets.backfill(job)
+                    self._replay_target_events(job)
+                except (ValueError, OSError, KeyError, TypeError, engine.CheckpointError):
+                    self.store.append_event(job['id'], {'kind': 'warning', 'message': 'تعذر استعادة بعض تفاصيل الأهداف؛ بقيت البيانات الأصلية محفوظة.'})
+            self._seed_enrichment()
             with contextlib.suppress(Exception):
                 browser = self.vpn.provider.get_status().get('browser', {})
                 if browser.get('running') and self.store.get_job(browser.get('job_id')):
@@ -135,13 +143,21 @@ class JobManager:
     def _public(self, job):
         result = {**NETWORK_DEFAULTS, "active_vpn_profile": None, "current_egress_ip": None,
                   "network_health": "unknown", "last_network_error": None, "last_failover_at": None,
-                  "failover_count": 0, **job}
+                  "failover_count": 0, 'kind': 'extraction', **job}
         result["ip_progress"] = progress_from_job(job)
+        if result['kind'] == 'enrichment':
+            progress = self.store.targets.progress(job['id'])
+            result['enrichment_progress'] = progress
+            result['ip_progress'] = {'extracted_unique_ips': progress['processed'], 'estimated_total_ips': progress['total'],
+                                     'progress_percent': progress['percent'], 'enrichment': progress,
+                                     'job_finished_successfully': job['status'] in ('completed', 'completed_warnings')}
+            result['stats'] = {**result.get('stats', {}), 'unique_ips': progress['processed'], 'completed_branches': progress['processed'],
+                               'ready_branches': progress['total'], 'remaining_branches': progress['pending'], 'plan_known': True}
         result['latest_request'] = self.store.requests.latest(job['id'])
         result.pop("_ip_progress_inputs", None)
         result.pop("_ip_progress_stored", None)
         with self._lock:
-            result["has_key"] = result["id"] in self._keys
+            result["has_key"] = result["id"] in self._keys or (result['kind'] == 'enrichment' and self.enrichment_settings.public()['has_key'])
             result["network_busy"] = self._active_id == result["id"]
             result['browser_session_open'] = self._browser_job == result['id']
         path = self._path(result["id"])
@@ -167,8 +183,14 @@ class JobManager:
             # their files during a rollback, leaving the additive SQLite table
             # behind. Startup is offline; normal dashboard polls do no scanning.
             self._restore_job_progress(job)
+        return jobs
 
     def _restore_job_progress(self, job):
+        if job.get('kind') == 'enrichment':
+            try: self._replay_target_events(job)
+            except (ValueError, OSError, KeyError, TypeError, engine.CheckpointError):
+                self.store.update_job(job['id'], status='waiting_input', input_reason='checkpoint', error='تعذر التحقق من نقطة استكمال الإثراء. بقيت بيانات المستودع محفوظة.')
+            return
         path = self._path(job["id"])
         try:
             ips = set(self._ips(job["id"]))
@@ -207,7 +229,7 @@ class JobManager:
             "queued": sum(j["status"] == "queued" for j in jobs),
             "completed": sum(j["status"] in ("completed", "completed_warnings") for j in jobs),
             "needs_attention": sum(j["status"] in ("waiting_input", "interrupted", "failed") for j in jobs),
-            "unique_ips": sum(j.get("stats", {}).get("unique_ips", 0) for j in jobs),
+            "unique_ips": sum(j.get("stats", {}).get("unique_ips", 0) for j in jobs if j.get('kind', 'extraction') == 'extraction'),
             "requests": sum(j.get("stats", {}).get("requests", 0) for j in jobs),
         }
         # unique_ips is a sum across jobs, never a cross-job deduplicated union.
@@ -218,7 +240,7 @@ class JobManager:
         return self._public(self._get(job_id))
 
     def _new_job(self, fields, key, *, start=True):
-        fields = {**NETWORK_DEFAULTS, **fields}
+        fields = {**NETWORK_DEFAULTS, 'kind': 'extraction', **fields}
         job_id = secrets.token_hex(16)
         path = self._path(job_id)
         path.mkdir(mode=0o700)
@@ -245,15 +267,166 @@ class JobManager:
         return self.get_job(job_id)
 
     def create_job(self, payload):
+        if isinstance(payload, dict) and payload.get('kind') == 'enrichment':
+            return self._create_enrichment(payload)
+        payload = dict(payload) if isinstance(payload, dict) else payload
+        if isinstance(payload, dict) and payload.pop('kind', 'extraction') != 'extraction':
+            raise JobValidationError('نوع المهمة غير صالح.')
         fields, key = validate_job(payload, allow_demo=self.demo)
         self.vpn.validate_policy({k: fields[k] for k in NETWORK_DEFAULTS})
         with self._lock:
             return self._new_job(fields, key)
 
+    def _create_enrichment(self, payload, *, automatic=False, context=None):
+        allowed = {'kind', 'title', 'target_ids', 'filters', 'mode', 'api_key', 'settings', 'priority', 'network', 'scheduled_at'}
+        if set(payload) - allowed: raise JobValidationError('حقول مهمة الإثراء غير صالحة.')
+        if 'target_ids' in payload and 'filters' in payload: raise JobValidationError('اختر عناوين محددة أو فلاتر.')
+        ids = payload.get('target_ids')
+        if ids is None: ids = self.store.targets.select_ids(payload.get('filters', {}))
+        if not isinstance(ids, list) or not ids or len(ids) > 100000 or any(not isinstance(x, str) or not re.fullmatch('[a-f0-9]{32}', x) for x in ids):
+            raise JobValidationError('اختر من 1 إلى 100000 هدف صالح.')
+        ids = list(dict.fromkeys(ids))
+        demos = set()
+        with self.store.connection() as c:
+            for offset in range(0, len(ids), 500):
+                batch = ids[offset:offset+500]
+                rows = c.execute('SELECT demo FROM targets WHERE id IN (' + ','.join('?' for _ in batch) + ')', batch).fetchall()
+                if len(rows) != len(batch): raise JobValidationError('أحد الأهداف غير موجود.')
+                demos.update(r[0] for r in rows)
+        if len(demos) != 1: raise JobValidationError('اختر الأهداف الحقيقية أو التجريبية في مهمة مستقلة.')
+        options = self.enrichment_settings.public()
+        source = payload.get('mode', options['source_mode'])
+        key = validate_key(payload.get('api_key'))
+        key_error = None
+        if not key and source != 'html':
+            try: key = self.enrichment_settings.key()
+            except RuntimeError as exc:
+                if not automatic: raise
+                key_error = str(exc)
+        base = context or {}
+        candidate = {'query': 'enrichment', 'title': payload.get('title', 'إثراء الأهداف'), 'mode': source,
+                     'settings': payload.get('settings', base.get('settings', {})), 'priority': payload.get('priority', 0 if automatic else 5),
+                     'network': payload.get('network', {k: base.get(k, v) for k, v in NETWORK_DEFAULTS.items()})}
+        if key: candidate['api_key'] = key
+        fields, key = validate_job(candidate, allow_demo=self.demo)
+        if demos == {1}:
+            if not self.demo: raise JobValidationError('يلزم تفعيل وضع التجربة لمعالجة أهداف تجريبية.')
+            fields['settings']['demo'] = True
+        fields.update(kind='enrichment', source_mode=source, automatic=automatic, origin_job_id=base.get('id'))
+        if base.get('shodan_account_id'): fields['shodan_account_id'] = base['shodan_account_id']
+        scheduled = payload.get('scheduled_at')
+        if scheduled:
+            from .targets import timestamp
+            scheduled = timestamp(scheduled)
+            if scheduled is None: raise JobValidationError('موعد المهمة غير صالح.')
+            fields['scheduled_at'] = scheduled
+        policy_error = None
+        try: self.vpn.validate_policy({k: fields[k] for k in NETWORK_DEFAULTS})
+        except (ValueError, RuntimeError) as exc:
+            if not automatic: raise
+            policy_error = str(exc)
+        with self._lock:
+            job = self._new_job(fields, key, start=False)
+            try:
+                self.store.targets.add_items(job['id'], ids, automatic)
+                if not self.store.targets.items(job['id']): raise JobValidationError('الأهداف محجوزة بالفعل لمهام إثراء.')
+                missing = fields['mode'] == 'api' and not key and not fields['settings']['demo']
+                self.store.update_job(job['id'], status='waiting_input' if missing or policy_error or key_error else 'queued',
+                                      **({'input_reason': 'network_error', 'error': policy_error} if policy_error else
+                                         {'input_reason': 'api_key', 'error': key_error} if key_error else {'input_reason': 'api_key'} if missing else {}))
+            except Exception:
+                self.store.delete_job(job['id']); shutil.rmtree(self._path(job['id'])); self._keys.pop(job['id'], None)
+                raise
+            self._wake.set()
+            return self.get_job(job['id'])
+
+    def _seed_enrichment(self):
+        if not self.enrichment_settings.public()['automatic']: return
+        for group in self.store.targets.automatic_candidates():
+            context = group['context']
+            queued = next((j for j in self.store.list_jobs() if j.get('kind') == 'enrichment' and j.get('automatic')
+                           and j.get('origin_job_id') == context['id'] and j['status'] == 'queued' and not j.get('attempts')), None)
+            if queued:
+                self.store.targets.add_items(queued['id'], group['ids'], automatic=True)
+            else:
+                self._create_enrichment({'kind': 'enrichment', 'title': 'إثراء — ' + (context.get('title') or context.get('query', ''))[:145],
+                                         'target_ids': group['ids']}, automatic=True, context=context)
+
+    def _observe_request(self, job_id, request_id):
+        job = self._get(job_id)
+        if job.get('kind', 'extraction') != 'extraction': return
+        with self.store.connection() as c:
+            row = c.execute('SELECT document FROM request_history WHERE job_id=? AND request_id=?', (job_id, request_id)).fetchone()
+            values = [json.loads(x[0]) for x in c.execute('SELECT document FROM request_values WHERE job_id=? AND request_id=? ORDER BY position', (job_id, request_id))]
+        if row: self.store.targets.observe_request(job, json.loads(row[0]), values)
+
+    def _target_event(self, job, event):
+        repo = self.store.targets
+        if event.get('kind') == 'enrichment_item':
+            item = event['item']
+            with self.store.connection() as c:
+                if not c.execute('SELECT 1 FROM enrichment_items WHERE job_id=? AND target_id=?', (job['id'], item['target_id'])).fetchone(): raise ValueError('هدف خارج مهمة الإثراء.')
+            repo.apply_item(job['id'], item)
+            return
+        ident = event.get('target_id')
+        if job.get('kind') == 'enrichment':
+            with self.store.connection() as c:
+                if not c.execute('SELECT 1 FROM enrichment_items WHERE job_id=? AND target_id=?', (job['id'], ident)).fetchone(): raise ValueError('هدف خارج مهمة الإثراء.')
+        else:
+            ip = str(ipaddress.ip_address(event['ip']))
+            with self.store.connection() as c:
+                if not c.execute('SELECT 1 FROM job_ips WHERE job_id=? AND ip=?', (job['id'], ip)).fetchone(): return
+                row = c.execute('SELECT id FROM targets WHERE ip=? AND demo=?', (ip, int(job['settings'].get('demo', False)))).fetchone()
+            if row is None: return
+            ident = row[0]
+        repo.snapshot(job['id'], ident, event['request_id'], event['source'], event['details'], event.get('fetched_at'))
+
+    def _replay_target_events(self, job):
+        path = self._path(job['id'])
+        if job.get('kind') == 'enrichment':
+            if not (path / 'checkpoint.json').exists(): return
+            from .enrichment import validate_checkpoint
+            saved = validate_checkpoint(engine.load_checkpoint(path / 'checkpoint.json'))
+            by_ip = {x['ip']: x['target_id'] for x in self.store.targets.items(job['id'])}
+            for item in saved['state']['items']:
+                if item['ip'] not in by_ip: raise ValueError('هدف استكمال خارج المهمة.')
+                item = {**item, 'target_id': by_ip[item['ip']]}
+                for snap in item.get('snapshots', []): self._target_event(job, {'kind': 'target_snapshot', 'target_id': item['target_id'], **snap})
+                if item['status'] != 'pending': self._target_event(job, {'kind': 'enrichment_item', 'item': item})
+            return
+        journal = path / 'target-observations.jsonl'
+        if not journal.exists() or journal.is_symlink(): return
+        with journal.open(encoding='utf-8') as stream:
+            for line in stream:
+                if not line.endswith('\n') or len(line.encode()) > 2 * 1024 * 1024: continue
+                try: self._target_event(job, json.loads(line))
+                except (ValueError, KeyError, TypeError): continue
+
     def _control(self, job_id, action):
         atomic_text(self._path(job_id) / "control.json", json.dumps({"action": action}))
 
     def action(self, job_id, payload):
+        if isinstance(payload, dict) and payload.get('action') == 'configure':
+            if set(payload) - {'action', 'priority', 'scheduled_at', 'settings'}: raise JobValidationError('إعدادات تشغيل غير صالحة.')
+            from .config import bounded
+            from .targets import timestamp
+            with self._lock:
+                job = self._get(job_id)
+                if job['status'] not in RESUMABLE | {'queued'} or self._active_id == job_id or self._browser_job == job_id:
+                    raise JobValidationError('أوقف المهمة وأغلق متصفحها قبل تعديل إعدادات التشغيل.')
+                changes = {}
+                if 'priority' in payload: changes['priority'] = bounded(payload['priority'], 'priority', 0, 10, True)
+                if 'scheduled_at' in payload:
+                    changes['scheduled_at'] = timestamp(payload['scheduled_at']) if payload['scheduled_at'] else None
+                    if payload['scheduled_at'] and changes['scheduled_at'] is None: raise JobValidationError('موعد المهمة غير صالح.')
+                if 'settings' in payload:
+                    if not isinstance(payload['settings'], dict) or 'demo' in payload['settings']: raise JobValidationError('إعدادات تشغيل غير صالحة.')
+                    changes['settings'] = settings_from({**job['settings'], **payload['settings']}, allow_demo=self.demo)
+                if self._redact(_json(changes)) != _json(changes): raise JobValidationError('ضع بيانات الاعتماد في الحقل المخصص.')
+                self.store.update_job(job_id, **changes)
+                self.store.append_event(job_id, {'kind': 'state', 'message': 'حُدثت إعدادات التشغيل والأولوية والموعد.'})
+                self._wake.set()
+                return self.get_job(job_id)
         if not isinstance(payload, dict) or set(payload) - {"action", "mode", "api_key"}:
             raise JobValidationError("طلب الإجراء غير صالح.")
         action = payload.get("action")
@@ -261,6 +434,12 @@ class JobManager:
             job = self._get(job_id)
             state = job["status"]
             if action == "duplicate":
+                if job.get('kind') == 'enrichment':
+                    return self._create_enrichment({'kind': 'enrichment', 'title': job['title'][:150] + ' — نسخة',
+                        'target_ids': [x['target_id'] for x in self.store.targets.items(job_id)],
+                        'mode': payload.get('mode', job.get('source_mode', job['mode'])), 'api_key': payload.get('api_key'),
+                        'settings': job['settings'], 'priority': job['priority'],
+                        'network': {k: job.get(k, v) for k, v in NETWORK_DEFAULTS.items()}}, context=job)
                 fields = {k: job[k] for k in ("title", "query", "mode", "settings", "priority")}
                 fields.update({k: job.get(k, v) for k, v in NETWORK_DEFAULTS.items()})
                 fields["title"] = fields["title"][:150] + " — نسخة"
@@ -299,6 +478,7 @@ class JobManager:
                     raise JobValidationError("يمكن الاستكمال بعد توقف المهمة فقط.")
                 key = validate_key(payload.get("api_key")) or self._keys.get(job_id)
                 mode = payload.get("mode", job["mode"])
+                if job.get('kind') == 'enrichment' and not key and mode != 'html': key = self.enrichment_settings.key()
                 if mode not in ("html", "api", "auto"):
                     raise JobValidationError("مصدر غير صالح.")
                 if mode == "auto":
@@ -324,7 +504,11 @@ class JobManager:
                     raise JobValidationError("أدخل مفتاح API أو اختر HTML.")
                 self._remember(job_id, key)
                 (self._path(job_id) / "control.json").unlink(missing_ok=True)
-                self.store.update_job(job_id, status="queued", mode=mode, error=None, finished_at=None, input_reason=None,
+                source_policy = payload.get('mode', job.get('source_mode', mode))
+                if job.get('kind') == 'enrichment' and job.get('source_mode') == 'auto' and mode == 'html' and self._browser_job == job_id:
+                    source_policy = 'auto'
+                extra = {'source_mode': source_policy} if job.get('kind') == 'enrichment' else {}
+                self.store.update_job(job_id, status="queued", mode=mode, error=None, finished_at=None, input_reason=None, **extra,
                                       browser_session_enabled=bool(job.get('browser_session_enabled') and mode=='html'))
                 self._wake.set()
             else:
@@ -348,6 +532,7 @@ class JobManager:
                         self._active_id = job["id"]
                 if job:
                     self._execute(job)
+                    self._seed_enrichment()
                     with self._lock:
                         self._active_id = None
                         if self._browser_job == job['id']:
@@ -657,6 +842,14 @@ class JobManager:
         job_id, path = job["id"], self._path(job["id"])
         with self._lock:
             key = self._keys.get(job_id)
+            if job.get('kind') == 'enrichment' and job.get('source_mode') != 'html' and not job.get('browser_session_enabled'):
+                try: key = key or self.enrichment_settings.key()
+                except RuntimeError as exc:
+                    self.store.update_job(job_id, status='waiting_input', input_reason='api_key', error=str(exc)); return
+                if job.get('source_mode') == 'auto' and not job.get('browser_session_enabled'):
+                    job = {**job, 'mode': 'api' if key else 'html'}
+                    self.store.update_job(job_id, mode=job['mode'])
+                self._remember(job_id, key)
             current = self._get(job_id)
             if current["status"] in ("pause_requested", "cancel_requested") or self._stop.is_set():
                 state = "cancelled" if current["status"] == "cancel_requested" else "paused"
@@ -683,7 +876,13 @@ class JobManager:
             self._process = process
         final = None
         try:
-            process.stdin.write(json.dumps({"job": job, "api_key": key}, ensure_ascii=False) + "\n")
+            worker_input = {"job": job, "api_key": key}
+            if job.get('kind') == 'enrichment':
+                manifest = path / 'enrichment-targets.json'
+                if manifest.is_symlink(): raise JobValidationError('ملف أهداف الإثراء غير صالح.')
+                atomic_text(manifest, json.dumps([{k: x[k] for k in ('target_id', 'ip', 'demo')}
+                                                 for x in self.store.targets.items(job_id)], ensure_ascii=False))
+            process.stdin.write(json.dumps(worker_input, ensure_ascii=False) + "\n")
             process.stdin.close()
             for line in process.stdout:
                 if len(line) > 2 * 1024 * 1024:
@@ -698,15 +897,20 @@ class JobManager:
                     continue
                 event = self._redact(event)
                 kind = event.get("kind")
+                if kind in ('target_snapshot', 'enrichment_item'):
+                    self._target_event(job, event)
+                    continue
                 if kind == "ip_batch":
                     self.store.record_ip_progress(job_id, event.get("ips", []),request_id=event.get('request_id'))
                     continue
                 if kind == 'request':
                     stored=self.store.requests.save(job_id,event['request'])
                     self.store.append_event(job_id,{'kind':'request','request':stored})
+                    self._observe_request(job_id, event['request']['request_id'])
                     continue
                 if kind == 'request_values':
                     self.store.requests.values(job_id,event['request_id'],event['offset'],event['rows'])
+                    self._observe_request(job_id, event['request_id'])
                     continue
                 with self._lock:
                     current = self._get(job_id)
@@ -734,13 +938,15 @@ class JobManager:
                             changes['browser_challenge_id'] = secrets.token_hex(16)
                             changes['browser_recovery_attempt'] = {**current.get('browser_recovery_attempt', {}), 'state': 'browser_challenge'}
                     if changes:
-                        updated = self.store.record_ip_progress(job_id,
-                            inputs=event.pop("ip_progress_inputs", None), **changes)
+                        updated = (self.store.update_job(job_id, **changes) if job.get('kind') == 'enrichment' else
+                                   self.store.record_ip_progress(job_id, inputs=event.pop("ip_progress_inputs", None), **changes))
                         event["stats"] = updated["stats"]
-                        event["ip_progress"] = progress_from_job(updated)
+                        event["ip_progress"] = self._public(updated)['ip_progress'] if job.get('kind') == 'enrichment' else progress_from_job(updated)
+                        if job.get('kind') == 'enrichment': event['enrichment_progress'] = self.store.targets.progress(job_id)
                 self.store.append_event(job_id, event)
             process.wait()
             self.store.requests.interrupt(job_id)
+            self._replay_target_events(self._get(job_id))
             if final is None:
                 current = self._get(job_id)
                 state = "cancelled" if current["status"] == "cancel_requested" else "interrupted"
@@ -804,10 +1010,16 @@ class JobManager:
             raise JobValidationError("بحث النتائج غير صالح.")
         ips = self._result_ips(job_id)
         selected = [ip for ip in ips if q.casefold() in ip.casefold()] if q else ips
-        return {"items": selected[offset:offset+limit], "total": len(selected), "all_total": len(ips), "offset": offset, "limit": limit}
+        result = {"items": selected[offset:offset+limit], "total": len(selected), "all_total": len(ips), "offset": offset, "limit": limit}
+        if self._get(job_id).get('kind') == 'enrichment':
+            visible = set(result['items'])
+            result['target_items'] = [{**x, 'document': json.loads(x['document'])} for x in self.store.targets.items(job_id) if x['ip'] in visible]
+        return result
 
     def _result_ips(self, job_id):
         job = self._get(job_id)
+        if job.get('kind') == 'enrichment':
+            return [x['ip'] for x in self.store.targets.items(job_id) if x['status'] != 'pending']
         if not job.get("_ip_progress_stored"):
             return self._ips(job_id)
         with self.store.connection() as con:
@@ -832,6 +1044,13 @@ class JobManager:
                 content = json.dumps(report, ensure_ascii=False, indent=2).encode()
             return content, "application/json; charset=utf-8", name + "." + format_name + ".json"
         ips = self._result_ips(job_id)
+        if job.get('kind') == 'enrichment' and format_name in ('csv', 'json'):
+            items = [{**x, 'document': json.loads(x['document'])} for x in self.store.targets.items(job_id)]
+            if format_name == 'json':
+                return json.dumps({'job_id': job_id, 'kind': 'enrichment', 'items': items}, ensure_ascii=False, indent=2).encode(), 'application/json; charset=utf-8', name + '.json'
+            stream = io.StringIO(newline=''); writer = csv.writer(stream); writer.writerow(['ip', 'status', 'details'])
+            for item in items: writer.writerow([item['ip'], item['status'], json.dumps(item['document'], ensure_ascii=False)])
+            return stream.getvalue().encode('utf-8-sig'), 'text/csv; charset=utf-8', name + '.csv'
         if format_name == "txt":
             return ("".join(ip + "\n" for ip in ips)).encode(), "text/plain; charset=utf-8", name + ".txt"
         if format_name == "csv":
@@ -856,6 +1075,8 @@ class JobManager:
             if len(serialized.encode()) > 32 * 1024 * 1024:
                 raise JobValidationError("نقطة الاستكمال تتجاوز 32 MiB.")
             checkpoint = json.loads(serialized)
+            if checkpoint.get('kind') == 'enrichment':
+                return self._import_enrichment_checkpoint(checkpoint, payload)
             cfg = checkpoint["config"]
             engine.validate_saved_config(cfg)
         except (engine.CheckpointError, engine.SpiderError, TypeError, ValueError, RecursionError):
@@ -909,6 +1130,28 @@ class JobManager:
                 self._keys.pop(job["id"], None)
                 shutil.rmtree(path)
                 raise JobValidationError("تعذر التحقق من حالة نقطة الاستكمال؛ لم تُرسل أي طلبات خارجية.") from None
+
+    def _import_enrichment_checkpoint(self, checkpoint, payload):
+        from .enrichment import validate_checkpoint
+        validate_checkpoint(checkpoint)
+        cfg = checkpoint['config']
+        demo = cfg.get('settings', {}).get('demo', False)
+        if demo and not self.demo: raise JobValidationError('نقطة استكمال تجريبية؛ فعّل وضع التجربة أولًا.')
+        with self._lock:
+            with self.store.connection() as c:
+                c.execute('BEGIN IMMEDIATE')
+                ids = [self.store.targets._target(c, item['ip'], demo) for item in checkpoint['state']['items']]
+                c.commit()
+            job = self._create_enrichment({'kind': 'enrichment', 'title': payload.get('title', cfg.get('title', 'إثراء مستورد')),
+                                          'target_ids': ids, 'mode': payload.get('mode', cfg['source_mode']),
+                                          'api_key': payload.get('api_key'), 'settings': cfg.get('settings', {})})
+            self.store.update_job(job['id'], status='paused', imported=True)
+            mapping = dict(zip((x['ip'] for x in checkpoint['state']['items']), ids))
+            for item in checkpoint['state']['items']: item['target_id'] = mapping[item['ip']]
+            engine.save_checkpoint(self._path(job['id']) / 'checkpoint.json', checkpoint)
+            self._replay_target_events(self._get(job['id']))
+            self.store.append_event(job['id'], {'kind': 'state', 'status': 'paused', 'message': 'استُوردت مهمة الإثراء؛ راجع الاتصال والمصدر ثم استكمل.'})
+            return self.get_job(job['id'])
 
     def shutdown(self):
         self._stop.set()

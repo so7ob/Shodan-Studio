@@ -91,6 +91,8 @@ class Store:
         migrate_browser_recovery(self)
         from .request_history import RequestHistory
         self.requests = RequestHistory(self)
+        from .targets import TargetRepository
+        self.targets = TargetRepository(self)
         if self.setup_required():
             self._ensure_setup_token()
 
@@ -280,6 +282,8 @@ class Store:
             job = json.loads(row[0])
             inserted=con.executemany("INSERT OR IGNORE INTO job_ips(job_id,ip) VALUES(?,?)",
                             ((job_id, ip) for ip in addresses)).rowcount
+            if addresses:
+                self.targets.discover(job, {}, addresses, quality='unknown', connection=con)
             if request_id:
                 attempt=con.execute("SELECT document,accepted_ips FROM request_history WHERE job_id=? AND request_id=? AND origin IN ('live','cache')",(job_id,request_id)).fetchone()
                 if attempt:

@@ -17,6 +17,14 @@
 
   function viewModel(progress) {
     const m = progress && typeof progress === 'object' ? progress : {};
+    if (m.enrichment) {
+      const p = m.enrichment, total = finiteCount(p.total) ?? 0, processed = finiteCount(p.processed) ?? 0;
+      const percent = total ? Math.min(100, Math.round(100 * processed / total)) : 100;
+      return {title:'تقدّم إثراء الأهداف', extracted:processed, total, remaining:total-processed, percent,
+        percentLabel:`${percent}%`, headline:`${formatter.format(processed)} / ${formatter.format(total)} عنوان عولج`,
+        description:'اكتمال المعالجة لا يعني توفر جميع تفاصيل المضيف.',
+        branchDescription:`مكتمل: ${p.success || 0} · جزئي: ${p.partial || 0} · غير موجود: ${p.not_found || 0} · متعثر: ${p.failed || 0}`, isEstimated:false};
+    }
     const extracted = finiteCount(m.extracted_unique_ips) ?? 0;
     const total = finiteCount(m.estimated_total_ips);
     const remaining = finiteCount(m.remaining_estimated_ips);
@@ -95,7 +103,7 @@
       fill.style.width = '32%';
     } else {
       track.setAttribute('role', 'progressbar');
-      track.setAttribute('aria-label', 'نسبة التقدّم في استخراج عناوين IP');
+      track.setAttribute('aria-label', progress?.enrichment ? 'نسبة التقدّم في إثراء الأهداف' : 'نسبة التقدّم في استخراج عناوين IP');
       track.setAttribute('aria-valuemin', '0');
       track.setAttribute('aria-valuemax', '100');
       track.setAttribute('aria-valuenow', String(data.percent));

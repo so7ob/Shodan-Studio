@@ -23,6 +23,8 @@ jobs:
       - run: node --check studio/static/vpn.js
       - run: node --check studio/static/browser.js
       - run: node --check studio/static/accounts.js
+      - run: node --check studio/static/targets.js
+      - run: node --check studio/static/app.js
       - run: bash install-debian.sh --check
       - run: bash tools/install_vpn_helper.sh --check
       - run: bash tools/install_browser.sh --check

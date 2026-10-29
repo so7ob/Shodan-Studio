@@ -1,0 +1,17 @@
+{
+  "isolated_copy": true,
+  "scheduler_started": false,
+  "network_connections": 0,
+  "source_jobs": 12,
+  "source_job_ip_links": 2107,
+  "unique_source_ips": 1463,
+  "repository_targets": 1463,
+  "discovery_records": 2165,
+  "unknown_discovery_times": 1795,
+  "automatic_enrichment_jobs": 9,
+  "automatic_claims": 1463,
+  "repeated_seed_is_idempotent": true,
+  "original_job_contracts_preserved": true,
+  "sqlite_integrity": "ok",
+  "credentials_and_browser_profiles_copied": false
+}

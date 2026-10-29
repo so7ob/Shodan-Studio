@@ -731,9 +731,17 @@ class ShodanAPIClient:
 
     def request(self, path: str, params: dict[str, str | int]) -> dict[str, Any]:
         """GET an allowed official API method; sanitize diagnostics on failure."""
-        if path not in _API_ALLOWED_PARAMS:
+        allowed = _API_ALLOWED_PARAMS.get(path)
+        if path.startswith('/shodan/host/') and path not in _API_ALLOWED_PARAMS:
+            try:
+                address = str(ipaddress.ip_address(path[len('/shodan/host/'):]))
+                if path == '/shodan/host/' + address:
+                    allowed = frozenset(('history', 'minify'))
+            except ValueError:
+                pass
+        if allowed is None:
             raise ShodanAPIError("[API_PATH] Unsupported API endpoint; no request was sent.")
-        if not isinstance(params, dict) or set(params) - _API_ALLOWED_PARAMS[path]:
+        if not isinstance(params, dict) or set(params) - allowed:
             raise ShodanAPIError("[API_PARAMS] Unsupported parameters; no request was sent.")
         if any(not isinstance(value, (str, int)) or isinstance(value, bool) for value in params.values()):
             raise ShodanAPIError("[API_PARAMS] Parameter values must be strings or integers.")
@@ -752,6 +760,10 @@ class ShodanAPIClient:
                                  failure_kind=exc.failure_kind) from None
         except (urllib.error.URLError, OSError, http.client.HTTPException, ValueError) as exc:
             raise _api_connection_error(exc, self._api_key) from None
+
+    def host(self, ip: str) -> dict[str, Any]:
+        address = str(ipaddress.ip_address(ip))
+        return self.request('/shodan/host/' + address, {'history': 'false', 'minify': 'false'})
 
     def _python_request(self, url: str) -> tuple[int, bytes, Message]:
         if self._opener is None:
@@ -844,7 +856,7 @@ from typing import Any
 
 
 MAX_CHECKPOINT_BYTES = 32 * 1024 * 1024
-_CHECKPOINT_SECRET_FIELDS = frozenset(("api_key", "api_key_resolved", "authorization", "cookie"))
+_CHECKPOINT_SECRET_FIELDS = frozenset(("api_key", "api_key_resolved", "authorization", "cookie", "password", "private_key", "privatekey", "presharedkey", "preshared_key"))
 
 
 class CheckpointError(Exception):
@@ -2502,6 +2514,9 @@ class Crawler:
     def on_request(self, entry: dict, rows=None) -> None:
         """Optional structured observation; never controls transport or retries."""
 
+    def on_host_records(self, entry, records):
+        """Optional allowlisted metadata sink for already received API matches."""
+
     def request_observed(self, entry, *, status=None, page=None, rows=None):
         if status: entry['status'] = status
         if page is not None:
@@ -2866,6 +2881,7 @@ class Crawler:
                     entry['rows'] = [{'value':ip,'label':ip,'count':count} for ip,count in page_counts.items()]
                     if total==0 and not records: entry['result_status']='empty'
                     self.request_observed(entry,status='parsed',rows=entry['rows'])
+                    self.on_host_records(entry, records)
                     self.progress(f"    API records received in leaf: {received}; unique IPs collected: {len(self.accepted)}")
                 except SpiderError as exc:
                     entry.update(status="failed", error=safe_detail(exc))

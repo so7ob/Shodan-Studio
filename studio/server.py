@@ -281,6 +281,34 @@ class StudioApp:
         if path == "/api/logout" and method == "POST":
             session = self.rotate_session(token, None, env, headers)
             return self.json_response(self.session_payload(session))
+        if path == '/api/enrichment/settings':
+            if method in {'GET', 'HEAD'}: return self.json_response(self.manager.enrichment_settings.public())
+            if method == 'POST':
+                with self.manager._lock:
+                    result = self.manager.enrichment_settings.save(payload)
+                    key = self.manager.enrichment_settings.key()
+                    if key: self.manager._secret_history.add(key)
+                    self.manager._seed_enrichment()
+                    return self.json_response(result)
+            raise HTTPError(405, 'طريقة الطلب غير مدعومة.', 'method_not_allowed')
+        if path == '/api/targets' or path.startswith('/api/targets/'):
+            if method not in {'GET', 'HEAD'}: raise HTTPError(405, 'طريقة الطلب غير مدعومة.', 'method_not_allowed')
+            from .targets import FILTERS
+            params = parse_qs(env.get('QUERY_STRING', ''), keep_blank_values=True, max_num_fields=32)
+            if set(params) - FILTERS - {'offset', 'limit', 'format'} or any(len(v) != 1 for v in params.values()):
+                raise HTTPError(400, 'فلاتر المستودع غير صالحة.', 'invalid_parameter')
+            filters = {k: v[0] for k, v in params.items() if k in FILTERS and v[0] != ''}
+            if path == '/api/targets/stats': return self.json_response(self.store.targets.stats(filters))
+            if path == '/api/targets/download':
+                format_name = params.get('format', ['csv'])[0]
+                content, mime = self.store.targets.export(filters, format_name)
+                headers.append(('Content-Disposition', f'attachment; filename="shodan-targets.{format_name}"'))
+                return 200, content, mime
+            offset, limit = self.query_int(params, 'offset', 0), self.query_int(params, 'limit', 100, 1, 1000)
+            if path == '/api/targets': return self.json_response(self.store.targets.list(filters, offset, limit))
+            match = re.fullmatch('/api/targets/([a-f0-9]{32})', path)
+            if match: return self.json_response({'target': self.store.targets.detail(match[1], offset, limit)})
+            raise HTTPError(404, 'الهدف غير موجود.', 'not_found')
         if path == "/api/vpn" and method in {"GET", "HEAD"}:
             return self.json_response(self.manager.vpn.summary())
         if path == '/api/shodan/accounts':
@@ -400,6 +428,8 @@ class StudioApp:
             "/static/accounts.js": ("accounts.js", "text/javascript; charset=utf-8"),
             "/static/requests.js": ("requests.js", "text/javascript; charset=utf-8"),
             "/static/requests.css": ("requests.css", "text/css; charset=utf-8"),
+            '/static/targets.js': ('targets.js', 'text/javascript; charset=utf-8'),
+            '/static/targets.css': ('targets.css', 'text/css; charset=utf-8'),
             "/static/vpn.css": ("vpn.css", "text/css; charset=utf-8"),
             "/favicon.svg": ("favicon.svg", "image/svg+xml"),
         }

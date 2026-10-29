@@ -98,6 +98,7 @@
       err.network = true;
       throw err;
     }
+    if (options.raw && response.ok) return response;
     let data;
     try { data = await response.json(); }
     catch (_) { throw new Error(`أعاد الخادم استجابة غير متوقعة (${response.status}).`); }
@@ -169,7 +170,7 @@
   function renderMetrics() {
     const jobs = state.jobs;
     text("metric-jobs", fmt(jobs.length));
-    text("metric-ips", fmt(jobs.reduce((sum, j) => sum + safeNum(getStats(j).unique_ips), 0)));
+    text("metric-ips", fmt(jobs.filter(j => j.kind !== 'enrichment').reduce((sum, j) => sum + safeNum(getStats(j).unique_ips), 0)));
     text("metric-running", fmt(jobs.filter((j) => activeStatuses.has(j.status)).length));
     text("metric-requests", fmt(jobs.reduce((sum, j) => sum + safeNum(getStats(j).requests), 0)));
     text("metric-completed", `${fmt(jobs.filter((j) => finishedStatuses.has(j.status)).length)} مكتملة`);
@@ -180,7 +181,8 @@
   }
   function renderJobs(force = false) {
     const query = $("job-search").value.trim().toLocaleLowerCase();
-    const jobs = state.jobs.filter((job) => matchesView(job, state.view) && (!query || `${job.title || ""} ${job.query || ""}`.toLocaleLowerCase().includes(query)));
+    const kind = $("job-kind-filter")?.value || 'all';
+    const jobs = state.jobs.filter((job) => (kind === 'all' || (job.kind || 'extraction') === kind) && matchesView(job, state.view) && (!query || `${job.title || ""} ${job.query || ""}`.toLocaleLowerCase().includes(query)));
     text("jobs-count", fmt(jobs.length));
     show("jobs-empty", state.jobs.length === 0);
     show("jobs-no-match", state.jobs.length > 0 && jobs.length === 0);
@@ -191,8 +193,9 @@
     const focusId = document.activeElement?.closest?.("[data-job]")?.dataset.job;
     $("jobs-body").innerHTML = jobs.map((job) => {
       const s = getStats(job);
-      const name = jobTitle(job);
-      return `<tr data-job="${escapeHTML(job.id)}" class="${job.id === state.selectedId ? "selected" : ""}" tabindex="0" aria-label="${escapeHTML(`تفاصيل ${name}`)}" aria-selected="${job.id === state.selectedId}"><td><span class="job-name">${escapeHTML(name)}</span><code class="job-query">${escapeHTML(job.query || "")}</code>${job.settings?.demo ? '<span class="job-subtitle">بيانات تجريبية محلية</span>' : ""}</td><td>${badge(job.status)}</td><td><div class="job-ip-progress" data-variant="compact"></div></td><td class="job-number">${fmt(s.unique_ips)}</td><td class="job-number">${fmt(s.requests)}</td><td class="job-date">${escapeHTML(dateText(job.updated_at, true))}</td><td><button class="icon-button" data-open-job="${escapeHTML(job.id)}" aria-label="عرض التفاصيل">${icon("arrow")}</button></td></tr>`;
+      const name = `${job.kind === 'enrichment' ? 'إثراء · ' : ''}${jobTitle(job)}`;
+      const queryLabel = job.kind === 'enrichment' ? `قائمة محفوظة · ${fmt(job.enrichment_progress?.total)} عنوان` : job.query || '';
+      return `<tr data-job="${escapeHTML(job.id)}" class="${job.id === state.selectedId ? "selected" : ""}" tabindex="0" aria-label="${escapeHTML(`تفاصيل ${name}`)}" aria-selected="${job.id === state.selectedId}"><td><span class="job-name">${escapeHTML(name)}</span><code class="job-query">${escapeHTML(queryLabel)}</code>${job.settings?.demo ? '<span class="job-subtitle">بيانات تجريبية محلية</span>' : ""}</td><td>${badge(job.status)}</td><td><div class="job-ip-progress" data-variant="compact"></div></td><td class="job-number">${fmt(s.unique_ips)}</td><td class="job-number">${fmt(s.requests)}</td><td class="job-date">${escapeHTML(dateText(job.updated_at, true))}</td><td><button class="icon-button" data-open-job="${escapeHTML(job.id)}" aria-label="عرض التفاصيل">${icon("arrow")}</button></td></tr>`;
     }).join("");
     $("jobs-body").querySelectorAll(".job-ip-progress").forEach((node, index) => {
       ShodanIPProgress.updateFromJob(node, jobs[index]);
@@ -200,6 +203,7 @@
     if (focusId) Array.from($("jobs-body").querySelectorAll("[data-job]")).find((node) => node.dataset.job === focusId)?.focus({ preventScroll: true });
   }
   function setView(view) {
+    ShodanTargets.workspace();
     ShodanVPN.workspace();
     state.view = view;
     $("job-filter").value = view;
@@ -218,6 +222,7 @@
       renderMetrics(); renderJobs(); setConnected(true);
       await ShodanVPN.refresh();
       await ShodanAccounts.refresh();
+      await ShodanTargets.refresh();
       text("last-sync", `آخر تحديث ${new Date().toLocaleTimeString("ar", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}`);
       if (state.selectedId) await refreshDetail();
       else {
@@ -266,14 +271,14 @@
     ShodanRequests.renderLatest(job);
     ShodanVPN.renderJob(job);
     const s = getStats(job);
-    text("detail-title", jobTitle(job)); text("detail-query", job.query || "");
+    text("detail-title", jobTitle(job)); text("detail-query", job.kind === 'enrichment' ? `قائمة محفوظة · ${fmt(job.enrichment_progress?.total)} عنوان` : job.query || "");
     $("detail-status").innerHTML = badge(job.status);
     text("results-tab-count", fmt(s.unique_ips));
     const phase = !activeStatuses.has(job.status)
       ? PHASE[job.status] || STATUS[job.status]?.[0] || "بانتظار البدء"
       : PHASE[s.phase] || (s.phase ? String(s.phase) : PHASE[job.status] || STATUS[job.status]?.[0] || "بانتظار البدء");
     text("detail-phase", phase);
-    const adaptive = job.settings?.strategy === "adaptive";
+    const adaptive = job.kind !== 'enrichment' && job.settings?.strategy === "adaptive";
     show("detail-planner", adaptive);
     const decision = s.last_partition;
     text("detail-planner", decision ? `اختار المخطط ${decision.facet}: ${fmt(decision.children)} فروع، نحو ${fmt(decision.estimated_requests)} طلبات استخراج. ${decision.raw_children > decision.children ? `جُمعت ${fmt(decision.raw_children)} قيمة في ${fmt(decision.children)} فروع. ` : ""}فحوص التقسيم: ${fmt(s.facet_probes)}.` : "يفحص IP مباشرة، ويقارن كلفة التقسيم فقط عند الحاجة. قد تتغير الخطة مع النتائج.");
@@ -289,6 +294,14 @@
     text("detail-total-requests", fmt(s.requests));
     text("detail-source", sourceText(s.source || job.mode)); text("detail-started", dateText(job.started_at));
     text("detail-warning-count", fmt(warningCount(s))); show("detail-demo", !!job.settings?.demo);
+    const enrichment = job.kind === 'enrichment';
+    text('detail-phase', enrichment && activeStatuses.has(job.status) && s.phase === 'enriching' ? 'إثراء تفاصيل المضيف' : phase);
+    ['stat-completed','stat-remaining','stat-ips'].forEach((id,index) => {
+      $(id).previousElementSibling.textContent = enrichment ? ['العناوين المعالجة','العناوين المتبقية','عناوين عولجت'][index] : ['الفروع المكتملة','الفروع المتبقية','عناوين فريدة'][index];
+    });
+    $('pane-overview').querySelector('.coverage-note').lastChild.textContent = enrichment
+      ? 'التقدم يقيس معالجة قائمة العناوين. قد تكون بعض النتائج جزئية أو غير موجودة؛ راجع تفاصيل المستودع وسجل المهمة.'
+      : 'نسبة التقدم تقديرية حسب عناوين IP الفريدة. تعني 100% اكتمال الفروع المخططة بنجاح. اكتمالها لا يعني أن Shodan أتاح كل العناوين المطابقة؛ راجع تحذيرات التغطية في التقرير.';
     updateCountdown();
     const aSignature = JSON.stringify([job.id, job.status]);
     if (aSignature !== state.actionSignature) {
@@ -297,6 +310,7 @@
       if (job.status === "running") actions += actionButton("pause", "إيقاف مؤقت", "pause");
       if (job.status === "queued") actions += actionButton("pause", "تعليق في الطابور", "pause");
       if (resumableStatuses.has(job.status)) actions += actionButton("resume", "استكمال", "play", "primary");
+      if (resumableStatuses.has(job.status) || job.status === 'queued') actions += actionButton('configure', 'إعدادات التشغيل', 'clock');
       if (["pause_requested", "cancel_requested"].includes(job.status)) actions += actionButton("wait", "جارٍ حفظ التقدم…", "clock", "secondary", true);
       actions += actionButton("duplicate", "نسخ المهمة", "copy");
       if (!finishedStatuses.has(job.status) && !["cancelled", "failed", "cancel_requested"].includes(job.status)) actions += `<button class="icon-button" data-action="cancel" title="إلغاء المهمة" aria-label="إلغاء المهمة">${icon("stop")}</button>`;
@@ -326,10 +340,10 @@
   function renderSettings(job) {
     const s = job.settings || {};
     const entries = [
-      ["المصدر المحدد", sourceText(job.mode)], ["الاستراتيجية", s.strategy === "adaptive" ? "تقليل الاستعلامات · Adaptive" : s.strategy === "tree" ? "Tree" : "Priority"],
+      ["المصدر المحدد", sourceText(job.source_mode || job.mode)], ...(job.kind === 'enrichment' ? [["نطاق المعالجة", `${fmt(job.enrichment_progress?.total)} عنوان محدد`]] : [["الاستراتيجية", s.strategy === "adaptive" ? "تقليل الاستعلامات · Adaptive" : s.strategy === "tree" ? "Tree" : "Priority"]]),
       ["عميل الاتصال", s.transport || "curl"], ["نوع العناوين", s.ip_version === "all" ? "IPv4 + IPv6" : `IPv${s.ip_version || "4"}`],
       ["حد الطلبات للجولة", fmt(s.max_requests ?? 500)], ["فاصل الطلبات", `${s.delay ?? 2} s`],
-      ["اختيار التقسيم", s.strategy === "adaptive" ? "تلقائي بحسب كلفة الطلبات والفروع" : Array.isArray(s.split_facets) ? s.split_facets.join(" → ") : s.split_facets || "asn → port → version → product"],
+      ...(job.kind === 'enrichment' ? [] : [["اختيار التقسيم", s.strategy === "adaptive" ? "تلقائي بحسب كلفة الطلبات والفروع" : Array.isArray(s.split_facets) ? s.split_facets.join(" → ") : s.split_facets || "asn → port → version → product"]]),
       ["عند تعذّر API", s.api_fallback === "stop" ? "التوقف" : "محاولة HTML"],
       ["أولوية الطابور", String(job.priority ?? 0)], ["تاريخ الإنشاء", dateText(job.created_at)],
     ];
@@ -403,6 +417,7 @@
       if (id !== state.selectedId || requestId !== state.resultRequest) return;
       state.results.items = (Array.isArray(data.items) ? data.items : []).map((item) => typeof item === "string" ? item : item.ip || item.address || item.ip_str || "").filter(Boolean);
       state.results.total = safeNum(data.total); state.results.offset = safeNum(data.offset, state.results.offset);
+      state.results.targetItems = data.target_items || [];
       renderResults();
     } catch (err) { if (requestId === state.resultRequest && err.status !== 401) toast(err.message, "error"); }
   }
@@ -412,6 +427,9 @@
     $("results-empty").querySelector("h3").textContent = r.q ? "لا توجد عناوين مطابقة" : "لا توجد عناوين محفوظة بعد";
     $("results-empty").querySelector("p").textContent = r.q ? "غيّر نص البحث لعرض نتائج أخرى." : "ستظهر النتائج عند حفظ أول مجموعة من العناوين.";
     $("results-grid").innerHTML = r.items.map((ip) => `<div class="ip-item"><span>${escapeHTML(ip)}</span><button data-copy-ip="${escapeHTML(ip)}" title="نسخ العنوان" aria-label="${escapeHTML(`نسخ ${ip}`)}">${icon("copy")}</button></div>`).join("");
+    if (r.targetItems?.length) {
+      $('results-grid').innerHTML = r.targetItems.map(x => `<div class="ip-item"><button class="target-ip" data-target-open="${escapeHTML(x.target_id)}" dir="ltr">${escapeHTML(x.ip)}</button><span>${escapeHTML(ShodanTargets.statusLabel(x.status))}</span><button data-copy-ip="${escapeHTML(x.ip)}" aria-label="نسخ ${escapeHTML(x.ip)}">${icon('copy')}</button></div>`).join('');
+    }
     text("results-range", r.items.length ? `${fmt(r.offset + 1)}–${fmt(r.offset + r.items.length)} من ${fmt(r.total)} عنوان` : `${fmt(r.total)} عنوان`);
     $("results-prev").disabled = r.offset === 0;
     $("results-next").disabled = r.offset + r.limit >= r.total;
@@ -432,16 +450,28 @@
     const dialog = $(id);
     if (!dialog.open) dialog.showModal();
   }
-  function openCreate() {
+  function openCreate(options = {}) {
     $("create-form").reset(); ShodanVPN.prepareCreate(); setFormError("create-error", "");
-    $("create-form").elements.demo.checked = !!state.session?.demo;
+    state.enrichmentSelection = options.enrichment || null;
+    const fields = $('create-form').elements, enrichment = !!state.enrichmentSelection;
+    fields.demo.checked = enrichment ? !!options.demo : !!state.session?.demo;
+    fields.query.required = !enrichment; fields.query.closest('label').hidden = enrichment;
+    fields.scheduled_at.value = '';
+    fields.strategy.closest('label').hidden = enrichment;
+    fields.always_asn.closest('label').hidden = enrichment;
+    fields.ip_version.closest('label').hidden = enrichment;
+    fields.include_non_global.closest('label').hidden = enrichment;
+    $('create-target-summary').hidden = !enrichment;
+    text('create-title', enrichment ? 'إنشاء مهمة إثراء' : 'إنشاء مهمة بحث');
+    text('create-target-summary', enrichment ? `إثراء ${fmt(options.count)} عنوان. تُحفظ قائمة الأهداف عند الإنشاء، وتعمل المهمة بنفس خصائص التشغيل والاستكمال والمتصفح.` : '');
+    if(enrichment) { fields.mode.value = options.mode || 'auto'; fields.title.value = 'إثراء الأهداف'; }
     updatePlannerFields(); updateKeyField("create"); openDialog("create-dialog");
   }
   function updatePlannerFields(resetCandidates = false) {
     const fields = $("create-form").elements;
     const adaptive = fields.strategy.value === "adaptive";
     show("split-facets-field", !adaptive);
-    show("automatic-planner-help", adaptive);
+    show("automatic-planner-help", adaptive && !state.enrichmentSelection);
     fields.split_facets.disabled = adaptive;
     fields.always_asn.disabled = adaptive;
     if (adaptive) fields.always_asn.checked = false;
@@ -459,7 +489,8 @@
     $("resume-form").reset(); setFormError("resume-error", "");
     const guidance = ShodanJobGuidance.viewModel(job);
     text("resume-description", `${guidance.message} ${guidance.checkpoint}`);
-    $("resume-mode").value = ["api", "html", "auto"].includes(job?.mode) ? job.mode : "html";
+    $("resume-mode").value = job?.kind === 'enrichment' ? job.source_mode || job.mode : ["api", "html", "auto"].includes(job?.mode) ? job.mode : "html";
+    if(job?.kind === 'enrichment' && job.browser_session_open) $('resume-mode').value = 'html';
     updateKeyField("resume"); openDialog("resume-dialog");
   }
   async function runAction(id, action, body = {}) {
@@ -532,6 +563,7 @@
     document.querySelectorAll("[data-view]").forEach((button) => button.addEventListener("click", () => setView(button.dataset.view)));
     $("job-filter").addEventListener("change", () => setView($("job-filter").value));
     $("job-search").addEventListener("input", () => renderJobs(true));
+    $('job-kind-filter').addEventListener('change', () => renderJobs(true));
     $("refresh-button").addEventListener("click", () => refreshAll(true));
     ["create-button", "empty-create"].forEach((id) => $(id).addEventListener("click", openCreate));
     $("jobs-body").addEventListener("click", (event) => { const row = event.target.closest("[data-job]"); if (row) selectJob(row.dataset.job); });
@@ -572,6 +604,8 @@
         },
       };
       if (key && payload.mode !== "html") payload.api_key = key;
+      if (fields.scheduled_at.value) payload.scheduled_at = new Date(fields.scheduled_at.value).toISOString();
+      if (state.enrichmentSelection) { delete payload.query; Object.assign(payload, {kind:'enrichment'}, state.enrichmentSelection); }
       $("create-submit").disabled = true;
       try {
         const data = await post("/api/jobs", {...payload, network:ShodanVPN.createPolicy()}); fields.api_key.value = "";
@@ -584,6 +618,7 @@
     $("detail-actions").addEventListener("click", async (event) => {
       const button = event.target.closest("[data-action]"); if (!button || !state.selectedId) return;
       const action = button.dataset.action;
+      if (action === 'configure') { ShodanTargets.configureJob(state.selectedJob); return; }
       if (action === "resume") { openResume(state.selectedId); return; }
       if (action === "cancel") { state.cancelId = state.selectedId; openDialog("confirm-dialog"); return; }
       button.disabled = true;
@@ -642,6 +677,7 @@
   ShodanRequests.init({api,copyText});
   ShodanAccounts.init({api,toast,closeSidebar,refreshAll});
   ShodanVPN.init({api, toast, closeSidebar, refreshAll, openResume, runAction, currentJob: id => state.jobs.find(j => j.id === id)});
+  ShodanTargets.init({api,toast,closeSidebar,refreshAll,openCreate,selectJob,setView});
   bindEvents(); loadSession();
   window.setInterval(() => { if (!document.hidden && state.session?.authenticated) refreshAll(); }, 2000);
   window.setInterval(updateCountdown, 1000);
