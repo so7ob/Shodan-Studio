@@ -43,6 +43,86 @@ sudo apt install python3 curl ca-certificates unzip
 
 ## 2. أسرع طريقة للتشغيل
 
+### التشغيل مباشرة من نسخة Git المحلية
+
+إذا كانت الملفات موجودة في `/root/So7ob/Shodan-Studio`، شغّل التطبيق من
+المسار نفسه، دون فك حزمة أو تشغيل المثبّت:
+
+```bash
+cd /root/So7ob/Shodan-Studio
+bash start.sh --host 127.0.0.1 --port 8787
+```
+
+افتح `http://127.0.0.1:8787`. يفحص `start.sh` إصدار Python، ثم يشغّل
+`python3 -m studio.server` من مجلد المشروع. لا يحتاج التشغيل الأساسي إلى
+`npm install` أو حزم `pip`؛ تبقى متطلبات VPN وPremium والمتصفح الاختيارية
+موضحة في أدلتها. أوقف التشغيل الأمامي بـ`Ctrl+C`.
+
+تُحفظ بيانات هذا التشغيل في `/root/So7ob/Shodan-Studio/data`، ويظهر رمز
+التهيئة الأولى في الطرفية وفي `data/setup-token.txt`. هذه البيانات مستقلة
+عن بيانات خدمة `systemd` المثبتة:
+
+| طريقة التشغيل | مصدر الكود | مسار البيانات |
+|---|---|---|
+| `bash start.sh` من نسخة Git | `/root/So7ob/Shodan-Studio` | `/root/So7ob/Shodan-Studio/data` |
+| خدمة `shodan-studio` | `/opt/shodan-studio/current` | `/var/lib/shodan-studio` |
+
+إذا كان `8787` مشغولًا، افحص المستمع أولًا:
+
+```bash
+ss -ltnp 'sport = :8787'
+systemctl status shodan-studio --no-pager
+```
+
+إذا كانت خدمة `shodan-studio` هي المستمع وتريد تشغيل نسخة Git بدلًا منها
+مؤقتًا، أوقف أي مهمة نشطة من الواجهة وانتظر حفظ تقدمها، ثم:
+
+```bash
+sudo systemctl stop shodan-studio
+cd /root/So7ob/Shodan-Studio
+bash start.sh --host 127.0.0.1 --port 8787
+```
+
+ستظهر حسابات ومهام مجلد `data` المحلي، وليس حسابات الخدمة المثبتة. للعودة
+إلى الخدمة وبياناتها السابقة، أوقف التشغيل المباشر بـ`Ctrl+C` ثم نفّذ
+`sudo systemctl start shodan-studio`. لتحديث الخدمة نفسها بالكود المحلي مع
+الاحتفاظ ببياناتها، اتبع [خطوات النسخ الاحتياطي والترقية](docs/VPN_DEPLOYMENT_AR.md)
+وقسم تثبيت الخدمة أدناه. تشغيل نسخة Git وحده لا يحدّث `/opt/shodan-studio/current`.
+
+يمكن إبقاء الخدمة على `8787` وتجربة نسخة Git بالتوازي على منفذ آخر:
+
+```bash
+bash start.sh --host 127.0.0.1 --port 8788
+```
+
+### تشغيل نسخة Git في الخلفية
+
+بعد التأكد أن المنفذ المطلوب متاح، ومن داخل مجلد المشروع:
+
+```bash
+cd /root/So7ob/Shodan-Studio
+umask 077
+mkdir -p data
+nohup bash start.sh --host 127.0.0.1 --port 8787 > data/local-server.log 2>&1 < /dev/null &
+echo $! > data/local-server.pid
+```
+
+تحقق من العملية ومن استجابة الخادم؛ حفظ PID وحده لا يثبت نجاح التشغيل:
+
+```bash
+ps -p "$(cat data/local-server.pid)" -o pid,args
+curl --fail http://127.0.0.1:8787/health
+tail -n 30 data/local-server.log
+```
+
+قبل إيقافها تأكد أن PID المحفوظ لا يزال يخص عملية `studio.server` التي
+شغّلتها، ثم نفّذ `kill "$(cat data/local-server.pid)"`. لإعادة التشغيل، انتظر
+خروجها وتحرير المنفذ ثم كرر أمر التشغيل. يحافظ `nohup` على العملية بعد إغلاق
+الطرفية؛ للتشغيل بعد إعادة تشغيل الجهاز استخدم خدمة `systemd` في القسم التالي.
+السجل قد يتضمن رمز التهيئة الأولى، لذا أبقه خاصًا ولا تشاركه كما هو.
+
+### التشغيل من حزمة ZIP
+
 فك ضغط الحزمة وانتقل إلى مجلدها:
 
 ```bash
