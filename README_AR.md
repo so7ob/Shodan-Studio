@@ -26,6 +26,8 @@
 
 تكامل Premium الاختياري يحتاج حزمة Debian `python3-cryptography`؛ راجع دليل الربط أعلاه.
 
+يمكن حفظ عدة حسابات Shodan واختيار حساب للمهمة وتسجيل الدخول عبر المتصفح المعزول؛ راجع [دليل حسابات Shodan](docs/SHODAN_ACCOUNTS_AR.md). تحتاج الخاصية أيضًا إلى `python3-cryptography`.
+
 تثبيت حزم Debian المطلوبة:
 
 ```bash

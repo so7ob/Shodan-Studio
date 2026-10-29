@@ -1,0 +1,17 @@
+{
+  "synthetic": true,
+  "live_account_login": false,
+  "service_deployed": false,
+  "python_full_suite": {
+    "passed": 291,
+    "note": "Full suite before final anonymous-resume guard; that guard and all account tests passed in the subsequent 17-test run."
+  },
+  "account_tests_after_guard": 17,
+  "javascript_presentation_tests": 22,
+  "browser_form_guard": "passed: official HTTPS origin/path, POST-only, CSRF fields retained, submitter override ignored, hostile origin/form rejected",
+  "installed_patchright_smoke": "passed against intercepted pages using system Chromium; no real account credentials",
+  "browser_ui": "passed: CRUD, selected account login, password omission, keyboard, 375/1280 RTL, zero axe violations in tested dialogs",
+  "screen_reader_tested": false,
+  "secret_storage": "Fernet encrypted payload with separate 0600 key; restart and backup restore checked",
+  "failover": "real offline worker retains selected account scope, checkpoint cache and 292 IPs after simulated VPN switch"
+}

@@ -193,6 +193,7 @@ class Session:
         off_task=bool(self.expected and current and not same_facet(current,self.expected))
         return {'running':True,'backend':getattr(self,'backend','chromium'),'state':'rate_limited' if doc.get('status')==429 else 'browser_challenge' if doc.get('challenge') else 'access_denied' if doc.get('status') in (401,403) else 'off_task_page' if off_task else 'ready' if self.ready else 'awaiting_verification',
                 'can_return_to_results':off_task,'http_status':doc.get('status'),'host':urlsplit(current).hostname or '', 'width':WIDTH,'height':HEIGHT,
+                'login_status':getattr(self,'login_status',None),
                 'browser_version':getattr(self,'browser_identity',{}).get('product',''),
                 'user_agent':getattr(self,'browser_identity',{}).get('userAgent','')}
 
@@ -243,8 +244,37 @@ class Session:
             time.sleep(.25)
         raise RuntimeError('[BROWSER_INPUT] افتح جلسة المتصفح وأكمل التحقق أو تسجيل الدخول يدويًا؛ لم تُستخرج نتائج غير متحققة.')
 
+    def login(self, data):
+        from .shodan_login import LOGIN_URL, login_expression
+        expression = login_expression(data)
+        self.expected = data['return_url']; self.ready = False; self.login_status = 'verification_required'
+        self.document = {}; self.page_url = LOGIN_URL
+        result = self.call('Page.navigate', {'url':LOGIN_URL})
+        if result.get('errorText'): raise RuntimeError('تعذر فتح صفحة تسجيل الدخول إلى Shodan.')
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline:
+            # Wait for the main document; never evaluate credentials on an old
+            # task page while a navigation is still pending.
+            if self.document.get('url','').startswith(LOGIN_URL):
+                loaded = self.call('Runtime.evaluate', {'expression':
+                    "location.origin==='https://account.shodan.io' && ['/login','/login/'].includes(location.pathname) && document.readyState!=='loading'", 'returnByValue':True})
+                if loaded.get('result',{}).get('value') is True:break
+                time.sleep(.1)
+                continue
+            if self.document.get('url'):
+                self.login_status = 'not_login_page'
+                return self.status()
+            time.sleep(.1)
+        self.login_status = 'verification_required'
+        if self.document.get('status') == 200 and not self.document.get('challenge'):
+            result = self.call('Runtime.evaluate', {'expression':expression,'returnByValue':True})
+            value = result.get('result',{}).get('value')
+            if value in ('submitted','verification_required','not_login_page','unsafe_form'): self.login_status = value
+        return self.status()
+
     def action(self,data):
         op=data.get('action')
+        if op=='login':return self.login(data)
         if op=='navigate' and set(data)=={'action','url'}:return self.navigate(data['url'])
         if op=='fetch' and set(data)=={'action','url'}:return self.fetch(data['url'])
         if op=='verify' and set(data)=={'action'}:return self.verify()

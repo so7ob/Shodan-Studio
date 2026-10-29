@@ -10,10 +10,13 @@ window.ShodanBrowser = (() => {
     $('browser-resume').disabled=inputBusy||opening||lastResult.state!=='ready';
     $('browser-return').disabled=inputBusy||opening||!lastResult.can_return_to_results;
     $('browser-verify').disabled=inputBusy||opening;
+    $('browser-login').disabled=inputBusy||opening||!job?.shodan_account_id;
   }
   function show(result) {
     lastResult=result;
     $('browser-status').textContent=(states[result.state]||'جارٍ التحقق')+(result.http_status ? ` · HTTP ${result.http_status}`:'');
+    const loginLabels={submitted:'أُرسلت بيانات الدخول. أكمل أي تحقق مطلوب، ثم عد إلى نتائج المهمة وافحص الصفحة.',verification_required:'أكمل التحقق المطلوب داخل المتصفح ثم حاول تسجيل الدخول.',not_login_page:'صفحة تسجيل الدخول غير ظاهرة؛ قد تكون الجلسة مسجلة بالفعل. عد إلى نتائج المهمة وافحص الصفحة.',unsafe_form:'لم تُرسل بيانات الدخول لأن نموذج الصفحة غير معتمد.'};
+    $('browser-login-status').textContent=loginLabels[result.login_status]||'';
     controls();
     if(result.image)$('browser-frame').src=result.image;
   }
@@ -44,7 +47,8 @@ window.ShodanBrowser = (() => {
     finally{opening=false;controls();render(job);schedule();}
   }
   function render(value){
-    job=value;
+    job=value;ShodanAccounts.renderJob(job);
+    $('browser-account-name').textContent=job?.shodan_account_id?ShodanAccounts.label(job.shodan_account_id):'اختر حسابًا من بطاقة المهمة بعد إغلاق الجلسة.';
     const stopped=job&&['paused','waiting_input','interrupted','failed'].includes(job.status);
     const recovery=job?.browser_recovery_attempt||{};
     $('job-browser-open').disabled=!job||job.mode!=='html'||job.network_mode==='direct'||!job.network_mode||!stopped||opening||recovery.state==='opening';
@@ -74,6 +78,7 @@ window.ShodanBrowser = (() => {
     $('browser-text-form').addEventListener('submit',event=>{event.preventDefault();if(opening)return;const text=$('browser-text').value;$('browser-text').value='';if(text)action({action:'text',text});});
     document.querySelectorAll('[data-browser-key]').forEach(b=>b.addEventListener('click',()=>action({action:'key',key:b.dataset.browserKey})));
     document.querySelectorAll('[data-browser-scroll]').forEach(b=>b.addEventListener('click',()=>action({action:'scroll',delta:Number(b.dataset.browserScroll)})));
+    $('browser-login').addEventListener('click',()=>action({action:'login'}));
     $('browser-verify').addEventListener('click',()=>action({action:'verify'}));
     $('browser-return').addEventListener('click',()=>action({action:'verify',return_to_results:true}));
     $('browser-end').addEventListener('click',async()=>{if(await action({action:'stop'})){$('browser-dialog').close();await ctx.refreshAll();}});

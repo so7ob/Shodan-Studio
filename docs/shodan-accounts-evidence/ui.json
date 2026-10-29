@@ -1,0 +1,14 @@
+{
+  "synthetic": true,
+  "liveShodanRequests": false,
+  "crud": true,
+  "passwordNotReturned": true,
+  "selectedAccountLogin": true,
+  "keyboard": true,
+  "rtlWidths": [
+    375,
+    1280
+  ],
+  "axeViolations": 0,
+  "pageErrors": []
+}

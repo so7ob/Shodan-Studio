@@ -163,8 +163,25 @@ class PatchrightSession:
             await asyncio.sleep(.25)
         raise RuntimeError('[BROWSER_INPUT] أكمل التحقق أو تسجيل الدخول يدويًا ثم افحص الصفحة.')
 
+    async def login(self, data):
+        from .shodan_login import LOGIN_URL, LOGIN_FUNCTION, login_payload
+        from patchright.async_api import Error
+        payload = login_payload(data)
+        self.expected = data['return_url']; self.ready = False; self.login_status = 'verification_required'
+        self.document = {}; self.page_url = LOGIN_URL
+        try:
+            await self.page.goto(LOGIN_URL, wait_until='domcontentloaded', timeout=20000)
+            if self.document.get('status') == 200 and not self.document.get('challenge'):
+                value = await self.page.evaluate(LOGIN_FUNCTION, payload)
+                if value in ('submitted','verification_required','not_login_page','unsafe_form'): self.login_status = value
+        except Error:
+            # Browser exception messages can contain evaluated arguments.
+            raise RuntimeError('تعذر إكمال تسجيل الدخول؛ راجع صفحة المتصفح.') from None
+        return await self.status_result()
+
     async def action(self, data):
         op = data.get('action')
+        if op == 'login': return await self.login(data)
         if op in ('navigate', 'fetch') and set(data) == {'action', 'url'}:
             return await getattr(self, op)(data['url'])
         if op == 'verify' and (set(data) == {'action'} or
