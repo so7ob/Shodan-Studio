@@ -206,3 +206,35 @@ Reproduce with `python3 tests/serve_vpn_fixture.py --request-history --port 8801
 and `node tests/browser_requests.cjs` with Playwright/axe and Chromium available.
 These are fixture and offline migration checks; rollout evidence is recorded
 separately after backup, deployment and live service/API verification.
+
+## Target repository and enrichment jobs — Issue #33, 2026-10-30
+
+The final local Python gate passed 349 tests in 305.405 seconds, with no skips.
+The final 16 focused enrichment/security tests also passed after adding source-echo
+redaction at the metadata sidecar boundary. All 33 Node tests passed. Installer/helper/browser dry-run checks, JavaScript
+syntax and diff checks passed. Coverage includes cross-job IP identity, correlated
+filters, timestamps and replay, services and snapshots, deletion retention,
+authenticated/CSRF routes, encrypted optional keys, shared job controls, schedule
+and runtime settings, checkpoints/import/recovery, API/HTML fallback, exact-host
+browser verification/RPC, malformed responses and persisted Retry-After holds.
+
+The isolated live-data-copy migration preserved 12 source jobs and 2,107 task/IP
+links, producing 1,463 inventory targets and 2,165 discovery records. Of those,
+1,795 have explicitly unknown historical times. It created 9 enrichment jobs and
+1,463 automatic claims; repeating seeding changed neither. Original task contracts
+and SQLite integrity passed. The scheduler never started, socket creation was
+blocked, and keys/browser profiles were not copied. The original service/state
+was not modified. Evidence: `docs/target-repository-evidence/migration.json`.
+
+The authenticated temporary UI fixture covers 120 synthetic IPs, filters,
+pagination, selection/focus retention, source/history details, enrichment creation,
+runtime settings and clearing a secret input on dialog close. RTL at 375/1280,
+keyboard navigation and axe passed with zero violations in the inventory and
+target/enrichment/create/runtime dialogs. No manual screen-reader audit was done.
+Evidence: `docs/target-repository-evidence/browser.json` and screenshots.
+
+These results are local/offline evidence. No original-service deployment or live
+enrichment was performed. A direct public example fetch from the development
+environment failed with `NETWORK_UNREACHABLE`; HTML parsing and browser acceptance
+use isolated fixtures and do not establish live Shodan/Cloudflare acceptance.
+Reproduction instructions: `docs/TARGET_REPOSITORY_AR.md`.

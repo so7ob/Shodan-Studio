@@ -10,7 +10,7 @@ import signal
 import subprocess
 import time
 
-from .browser_session import facet_url
+from .browser_session import resource_url as facet_url
 from .vpn_config import profile_id
 
 ROOT = Path('/var/lib/shodan-studio-browser')

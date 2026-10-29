@@ -35,12 +35,12 @@ def emit(kind: str, **fields) -> None:
     sys.stdout.flush()
 
 
-def build_args(job_dir: Path, job: dict, key: str | None):
+def build_args(job_dir: Path, job: dict, key: str | None, *, ignore_checkpoint=False):
     """Construct a fixed CLI argument vector; shell syntax is never evaluated."""
     cfg = settings_from({"strategy": "priority", **job["settings"]}, allow_demo=True)
     checkpoint = job_dir / "checkpoint.json"
     argv = ["--mode", job["mode"], "--save-partial", "--on-source-error", "pause"]
-    if checkpoint.exists():
+    if checkpoint.exists() and not ignore_checkpoint:
         argv += ["--resume", str(checkpoint)]
     else:
         argv += ["--query", job["query"], "--output", str(job_dir / "result.txt"),
@@ -359,6 +359,25 @@ class StudioCrawler(engine.Crawler):
         super().collect_ips(page)
         self._sync_live()
 
+    def on_host_records(self, entry, records):
+        from .targets import normalize_details
+        grouped = {}
+        for row in records:
+            ip = engine.parse_ip(row.get('ip_str', ''))
+            if ip not in self.accepted: continue
+            address = str(ip)
+            item = grouped.setdefault(address, {**row, 'ip_str': address, 'data': []})
+            item['data'].append(row)
+        for address, raw in grouped.items():
+            event = {'kind': 'target_snapshot', 'ip': address, 'source': 'api', 'request_id': entry['request_id'],
+                     'fetched_at': entry['finished_at'], 'details': normalize_details(address, raw)}
+            event = engine.redact_report(event, self.args.api_key_resolved)
+            # A sidecar preserves allowlisted metadata across a lost IPC pipe.
+            with (self.job_dir / 'target-observations.jsonl').open('a', encoding='utf-8') as stream:
+                os.chmod(stream.name, 0o600)
+                stream.write(json.dumps(event, ensure_ascii=False) + '\n'); stream.flush(); os.fsync(stream.fileno())
+            emit('target_snapshot', **{k: v for k, v in event.items() if k != 'kind'})
+
 
 def run_worker(job_dir: Path, payload: dict) -> int:
     os.umask(0o077)
@@ -370,6 +389,9 @@ def run_worker(job_dir: Path, payload: dict) -> int:
 
 
 def _run_worker_locked(job_dir: Path, payload: dict) -> int:
+    if payload['job'].get('kind') == 'enrichment':
+        from .enrichment import run
+        return run(job_dir, payload)
     job, key = payload["job"], validate_key(payload.get("api_key"))
     if key:
         engine._REGISTERED_SECRETS.add(key)

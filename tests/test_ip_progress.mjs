@@ -133,3 +133,11 @@ test('compact list retains secondary branch counts and safely renders text', () 
   assert.equal(container.children[2].children[0].style.width, '65%');
   assert.match(container.children.at(-1).textContent, /16 \/ 77/);
 });
+
+test('enrichment progress counts processed targets and keeps outcomes separate', () => {
+  const api = require('../studio/static/ip_progress.js');
+  const view = api.viewModel({enrichment:{total:10,processed:10,success:6,partial:2,not_found:1,failed:1}});
+  assert.equal(view.percent,100);assert.equal(view.isEstimated,false);
+  assert.match(view.headline,/10 \/ 10/);assert.match(view.description,/لا يعني توفر/);
+  assert.match(view.branchDescription,/جزئي: 2/);
+});

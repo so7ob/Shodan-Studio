@@ -108,7 +108,7 @@ def settings_from(payload: Any, *, allow_demo=False) -> dict:
 def validate_job(payload: Any, *, allow_demo=False) -> tuple[dict, str | None]:
     if not isinstance(payload, dict):
         raise JobValidationError("المهمة يجب أن تكون كائنًا.")
-    if set(payload) - {"title", "query", "mode", "api_key", "settings", "priority", "network"}:
+    if set(payload) - {"title", "query", "mode", "api_key", "settings", "priority", "network", "scheduled_at"}:
         raise JobValidationError("توجد حقول غير مدعومة في المهمة.")
     query = text(payload.get("query"), "استعلام Shodan", 8192)
     try:
@@ -131,4 +131,10 @@ def validate_job(payload: Any, *, allow_demo=False) -> tuple[dict, str | None]:
     network = policy(payload.get("network"))
     if "browser_recovery" not in (payload.get("settings") or {}) and mode == "html" and network["network_mode"] != "direct" and not settings["demo"]:
         settings["browser_recovery"] = "on_challenge"
-    return {"title": title, "query": query, "mode": mode, "settings": settings, "priority": priority, **network}, key
+    result = {"title": title, "query": query, "mode": mode, "settings": settings, "priority": priority, **network}
+    if payload.get('scheduled_at'):
+        from .targets import timestamp
+        scheduled = timestamp(payload['scheduled_at'])
+        if scheduled is None: raise JobValidationError('موعد المهمة غير صالح.')
+        result['scheduled_at'] = scheduled
+    return result, key

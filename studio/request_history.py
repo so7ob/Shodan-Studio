@@ -22,7 +22,7 @@ TEXT = ('query', 'facet', 'source', 'transport', 'started_at', 'finished_at', 'e
 
 def state_for(entry):
     status, error = entry.get('result_status',entry.get('status')), str(entry.get('error') or '')
-    if status=='parsed' and entry.get('row_count')==0:
+    if status=='parsed' and entry.get('row_count')==0 and entry.get('facet') != 'host':
         return 'empty' if entry.get('displayed_total',entry.get('total_records'))==0 else 'unavailable'
     if status == 'interrupted': return 'uncertain'
     if status == 'failed':

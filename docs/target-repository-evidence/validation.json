@@ -1,0 +1,38 @@
+{
+  "date": "2026-10-30",
+  "issue": 33,
+  "base_commit": "cb0aebf",
+  "python": {
+    "tests": 349,
+    "failures": 0,
+    "errors": 0,
+    "skips": 0,
+    "seconds": 305.405,
+    "command": "python3 -m unittest discover -s tests"
+  },
+  "node": {
+    "tests": 33,
+    "failures": 0,
+    "skips": 0,
+    "command": "node --test tests/test_ip_progress.mjs tests/test_job_guidance.mjs tests/test_requests.mjs"
+  },
+  "javascript_syntax": true,
+  "installer_helper_browser_checks": true,
+  "browser_fixture": true,
+  "browser_widths": [
+    375,
+    1280
+  ],
+  "axe_violations": 0,
+  "request_history_browser_regression": true,
+  "isolated_migration": true,
+  "production_deployment": false,
+  "live_enrichment": false,
+  "live_example_fetch": "NETWORK_UNREACHABLE",
+  "manual_screen_reader": false,
+  "focused_enrichment_security": {
+    "tests": 16,
+    "failures": 0,
+    "command": "python3 -m unittest discover -s tests -p 'test_enrichment.py'"
+  }
+}

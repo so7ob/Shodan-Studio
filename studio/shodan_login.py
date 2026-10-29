@@ -1,7 +1,7 @@
 """Credential submission is restricted to Shodan's own top-level login form."""
 import json
 from .shodan_accounts import credentials
-from .browser_session import facet_url
+from .browser_session import resource_url as facet_url
 
 LOGIN_URL = 'https://account.shodan.io/login'
 

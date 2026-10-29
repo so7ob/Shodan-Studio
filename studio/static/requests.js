@@ -9,9 +9,9 @@
  function describe(r){
   const duration=typeof r.duration_ms==='number'?`${count(Math.round(r.duration_ms)/1000)} ثانية`:'غير متاحة';
   return {status:labels[r.status]||labels.uncertain,
-   meta:[r.facet||'مرشح غير معروف',r.source==='api'?'Shodan API':r.source==='html'?'Shodan HTML':'مصدر غير معروف',
+   meta:[r.facet==='host'?'تفاصيل المضيف':r.facet||'مرشح غير معروف',r.source==='api'?'Shodan API':r.source==='html'?'Shodan HTML':'مصدر غير معروف',
     r.api_page!=null?`صفحة ${count(r.api_page)}`:'',r.http_status!=null?`HTTP ${r.http_status}`:'',origins[r.origin]||''].filter(Boolean).join(' · '),
-   result:`إجمالي السجلات: ${count(r.total_records)} · عناصر الصفحة: ${count(r.row_count)}${r.facet==='ip'?` · عناوين IP جديدة: ${count(r.new_unique_ips)}`:''} · المدة: ${duration}`};
+   result:r.facet==='host'?`الخدمات في الاستجابة: ${count(r.row_count)} · المدة: ${duration}`:`إجمالي السجلات: ${count(r.total_records)} · عناصر الصفحة: ${count(r.row_count)}${r.facet==='ip'?` · عناوين IP جديدة: ${count(r.new_unique_ips)}`:''} · المدة: ${duration}`};
  }
  function formatMessage(r){const d=describe(r);return `${d.status} | ${d.meta} | ${r.query||'استعلام غير متاح'} | ${d.result}${r.error?' | '+r.error:''}`;}
  let api,copy,jobId=null,epoch=0,busy=false,cursor=null,loaded=false,mode='requests';

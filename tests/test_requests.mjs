@@ -2,6 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
 const {describe,formatMessage}=createRequire(import.meta.url)('../studio/static/requests.js');
+test('host lookup results report services independently of discovery counts',()=>{
+ const d=describe({status:'success',facet:'host',source:'html',row_count:0,duration_ms:10});
+ assert.match(d.meta,/تفاصيل المضيف/);assert.match(d.result,/الخدمات في الاستجابة: 0/);
+ assert.doesNotMatch(d.result,/عناوين IP جديدة/);
+});
 test('request results distinguish records, page items and newly stored unique IPs',()=>{
  const d=describe({status:'success',facet:'ip',source:'api',api_page:2,total_records:579,row_count:100,new_unique_ips:80,duration_ms:1500});
  assert.equal(d.status,'نجح');assert.match(d.meta,/صفحة 2/);

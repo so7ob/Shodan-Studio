@@ -40,8 +40,16 @@ def facet_url(url):
 
 def same_facet(url, expected):
     """Compare validated task URLs, allowing equivalent query encoding/order."""
-    try:return facet_url(url)==facet_url(expected)
+    try:return resource_url(url)==resource_url(expected)
     except (ValueError,TypeError):return False
+
+
+def resource_url(url):
+    """Validated resource identity; host reads never authorize arbitrary URLs."""
+    if isinstance(url, str) and url.startswith('https://www.shodan.io/host/'):
+        from .enrichment import host_page_url
+        return ('host', host_page_url(url))
+    return ('facet', *facet_url(url))
 
 
 def browser_page_failure(state):
@@ -183,7 +191,7 @@ class Session:
         elif method=='Page.javascriptDialogOpening':self.call('Page.handleJavaScriptDialog',{'accept':False},wait=False)
 
     def navigate(self,url):
-        facet_url(url);self.expected=url;self.document={};self.ready=False;self.page_url=url
+        resource_url(url);self.expected=url;self.document={};self.ready=False;self.page_url=url
         result=self.call('Page.navigate',{'url':url})
         if result.get('errorText'):
             code = 'TLS_CERTIFICATE' if 'ERR_CERT_' in result['errorText'] else 'BROWSER_NETWORK'
@@ -216,9 +224,15 @@ class Session:
         doc=self.document
         if not self.expected or doc.get('url')!=page['url'] or doc.get('challenge') or doc.get('status')!=200:
             return self.status()
-        query,facet=facet_url(self.expected)
+        resource=resource_url(self.expected)
         on_task=same_facet(page['url'],self.expected) and same_facet(doc.get('url'),self.expected)
-        try:parse_facet_html(page['html'],facet,query,allow_missing_facet=facet!='ip')
+        try:
+            if resource[0] == 'host':
+                from .enrichment import parse_host_html
+                parse_host_html(page['html'],resource[1])
+            else:
+                _,query,facet=resource
+                parse_facet_html(page['html'],facet,query,allow_missing_facet=facet!='ip')
         except FacetParseError as exc:
             tag=str(exc).partition(']')[0]
             state={'[LOGIN':'login_required','[ACCESS':'browser_challenge','[DENIED':'access_denied'}.get(tag)
@@ -240,7 +254,7 @@ class Session:
     def fetch(self,url):
         from .engine import http_failure
         from email.message import Message
-        facet_url(url)
+        resource_url(url)
         def source_failure():
             # Check the current main document before navigation can erase it.
             # A different facet/login URL does not authorize retrying a denial.

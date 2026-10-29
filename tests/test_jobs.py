@@ -124,6 +124,8 @@ class JobsTests(unittest.TestCase):
         self.manager.start()
         result = self.wait(job["id"])
         self.assertEqual(result["status"], "completed")
+        # Stop the scheduler before examining transient SQLite WAL files.
+        self.manager.shutdown()
         for path in Path(self.tmp.name).rglob("*"):
             if path.is_file():
                 self.assertNotIn(key.encode(), path.read_bytes(), path.name)

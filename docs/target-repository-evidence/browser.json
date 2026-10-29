@@ -1,0 +1,26 @@
+{
+  "fixture": true,
+  "externalRequests": 0,
+  "rtlWidths": [
+    375,
+    1280
+  ],
+  "pagination": true,
+  "filters": true,
+  "keyboard": true,
+  "selectionAndFocusRetained": true,
+  "details": true,
+  "enrichmentCreation": true,
+  "runtimeSettings": true,
+  "secretFieldClearedOnClose": true,
+  "axeScopes": [
+    "inventory",
+    "target details",
+    "enrichment settings",
+    "create job",
+    "runtime settings"
+  ],
+  "axeViolations": 0,
+  "manualScreenReader": false,
+  "errors": []
+}
