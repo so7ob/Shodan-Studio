@@ -190,6 +190,11 @@ class ManagerTests(unittest.TestCase):
                        'split_facets': ['asn', 'port', 'org'], 'include_non_global': True,
                        'max_requests': 100, 'retry_base_delay': 1, 'max_retry_wait': 10}
                 self.store.update_job(job['id'], settings=cfg, browser_session_enabled=browser)
+                account_scope = None
+                if browser:
+                    account = self.manager.shodan_account_save({'username':'failover-fixture','password':'fixture-account-secret'})
+                    self.store.update_job(job['id'], shodan_account_id=account['id'])
+                    account_scope = self.manager.shodan_accounts.secret(account['id'])['scope']
                 self.provider.calls.clear()
                 # Each independent job starts with fresh candidate cooldowns.
                 self.vpn.clock = lambda: time.time()
@@ -202,6 +207,7 @@ class ManagerTests(unittest.TestCase):
                     self.assertIsNone(self.manager._process)
                     starts.append(payload['action'])
                     if payload['action'] == 'start':
+                        self.assertEqual(payload.get('account_scope'),account_scope)
                         self.assertTrue(payload['defer_navigation'])
                         self.assertEqual(self.provider.active, test_vpn.P2)
                         self.assertTrue((self.manager._path(ident) / 'checkpoint.json').exists())
@@ -223,6 +229,8 @@ class ManagerTests(unittest.TestCase):
                 self.assertEqual(starts, ['stop', 'start'] if browser else [])
                 report = json.loads((self.manager._path(job['id']) / 'result.txt.report.json').read_text())
                 self.assertGreaterEqual(report['resume']['cached_pages'], 8)
+                self.assertNotIn('fixture-account-secret',json.dumps(report))
+                self.assertNotIn('fixture-account-secret',(self.manager._path(job['id'])/'checkpoint.json').read_text())
                 self.assertEqual(saved['settings']['max_requests'], 100)
                 self.manager._browser_job = None
 

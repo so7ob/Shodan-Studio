@@ -63,3 +63,12 @@ text countdown below progress; label ordinary request spacing separately from
 source rate-limit waits. Use a timer role without per-second live announcements,
 retain the existing colors and typography, and hide legacy facet ordering in
 adaptive mode. No new fonts, animations or layout system.
+
+## Saved Shodan accounts — Issue #25
+
+Use the existing Arabic RTL controls and colors. Account management is a named
+modal reachable from the sidebar and job network card. Show account labels and
+usernames; passwords are write-only and empty on edit. The job has a labelled
+account selector, and the browser has a separate sign-in action with explicit
+submission/verification status. Account CRUD, keyboard entry and sign-in controls
+are checked at 375/1280 with axe. No new fonts, framework or visual theme.

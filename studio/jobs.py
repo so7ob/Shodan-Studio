@@ -39,6 +39,8 @@ class JobManager:
         self.store = store or Store(self.data_dir)
         self.demo = demo
         self.vpn = VPNManager(self.store)
+        from .shodan_accounts import ShodanAccounts
+        self.shodan_accounts = ShodanAccounts(self.store)
         self.jobs_dir = self.data_dir / "jobs"
         if self.jobs_dir.is_symlink():
             raise ValueError("مجلد المهام لا يقبل الروابط الرمزية.")
@@ -293,6 +295,8 @@ class JobManager:
                     raise JobValidationError("مصدر غير صالح.")
                 if mode == "auto":
                     mode = "api" if key else "html"
+                if mode == 'html' and job.get('shodan_account_id') and (not job.get('browser_session_enabled') or self._browser_job != job_id):
+                    raise JobValidationError('افتح متصفح المهمة بالحساب المختار وسجّل الدخول وافحص صفحة النتائج قبل الاستكمال.')
                 if job.get('browser_session_enabled'):
                     if mode != 'html' and self._browser_job == job_id: raise JobValidationError('أغلق جلسة المتصفح قبل تغيير مصدر المهمة.')
                     if mode == 'html':
@@ -381,6 +385,77 @@ class JobManager:
         from .vpn_client import rpc
         return rpc('browser', job_id=job_id, input=payload)
 
+    def shodan_account_save(self, payload, ident=None):
+        if ident is None:
+            with self._lock:return self.shodan_accounts.save(payload)
+        def operation():
+            if self._browser_job: raise RuntimeError('أغلق جلسة المتصفح قبل تعديل حسابات Shodan.')
+            username, password, _, previous = self.shodan_accounts.validate(payload, ident)
+            if previous and (username, password) != (previous['username'], previous['password']) and self.shodan_accounts.used(ident):
+                self._browser_rpc(ident, {'action':'forget_account','account_scope':previous['scope']})
+            return self.shodan_accounts.save(payload, ident)
+        return self._vpn_mutation(operation)
+
+    def shodan_account_delete(self, ident):
+        def operation():
+            if self._browser_job: raise RuntimeError('أغلق جلسة المتصفح قبل حذف حساب Shodan.')
+            saved = self.shodan_accounts.secret(ident)
+            if self.shodan_accounts.used(ident):
+                self._browser_rpc(ident, {'action':'forget_account','account_scope':saved['scope']})
+            self.shodan_accounts.delete(ident)
+            with self.store.connection() as con:
+                jobs = [row[0] for row in con.execute('SELECT id FROM jobs')]
+            for job_id in jobs:
+                job = self._get(job_id)
+                if job.get('shodan_account_id') == ident:
+                    self.store.update_job(job_id, shodan_account_id=None, browser_session_enabled=False)
+            return {'deleted':True}
+        return self._vpn_mutation(operation)
+
+    def shodan_account_select(self, job_id, payload):
+        if not isinstance(payload,dict) or set(payload)!={'account_id'}:raise ValueError('اختر حساب Shodan صالحًا.')
+        def operation():
+            job = self._get(job_id)
+            if job['status'] not in RESUMABLE or job['mode']!='html' or self._browser_job:
+                raise RuntimeError('اختر مهمة HTML متوقفة وأغلق جلسة المتصفح قبل تغيير الحساب.')
+            ident=payload['account_id']
+            if ident is not None:self.shodan_accounts.metadata(ident)
+            self.store.update_job(job_id, shodan_account_id=ident, browser_session_enabled=False)
+            return self.get_job(job_id)
+        return self._vpn_mutation(operation)
+
+    def _account_browser_input(self, job):
+        ident = job.get('shodan_account_id')
+        if not ident:return {}
+        scope = self.shodan_accounts.secret(ident)['scope']
+        self.shodan_accounts.mark_used(ident)
+        return {'account_scope':scope}
+
+    def _shodan_login(self, job):
+        from .browser_recovery import pending_url
+        if not job.get('shodan_account_id'):raise ValueError('اختر حساب Shodan للمهمة أولًا.')
+        if self._browser_job != job['id']:raise RuntimeError('افتح متصفح المهمة قبل تسجيل الدخول.')
+        saved = self.shodan_accounts.secret(job['shodan_account_id'])
+        try:
+            result = self._browser_rpc(job['id'], {'action':'login','username':saved['username'],
+                'password':saved['password'],'return_url':pending_url(job,self._path(job['id']))})
+        except Exception:
+            # RPC/driver exception arguments may contain evaluated credentials.
+            raise RuntimeError('تعذر تسجيل الدخول إلى Shodan؛ راجع صفحة المتصفح ثم حاول مجددًا.') from None
+        # Never forward raw credential-operation responses to a client or log.
+        safe = {}
+        enums = {'backend':('chromium','patchright'), 'state':('rate_limited','browser_challenge','access_denied','off_task_page','ready','awaiting_verification'),
+                 'login_status':('submitted','verification_required','not_login_page','unsafe_form')}
+        for key, values in enums.items():
+            if result.get(key) in values:safe[key]=result[key]
+        for key in ('running','can_return_to_results'):
+            if type(result.get(key)) is bool:safe[key]=result[key]
+        for key in ('width','height','http_status'):
+            if type(result.get(key)) is int and 0 < result[key] < 10000:safe[key]=result[key]
+        result = safe
+        self.vpn.audit('shodan_login',job_id=job['id'],status='submitted' if result.get('login_status')=='submitted' else 'verification_required')
+        return result
+
     def browser_policy(self, job_id, payload):
         if not isinstance(payload, dict) or set(payload) != {'browser_recovery'} or payload['browser_recovery'] not in ('manual', 'on_challenge'):
             raise JobValidationError('اختر سياسة استرداد المتصفح المدعومة.')
@@ -433,7 +508,7 @@ class JobManager:
             self.store.update_job(job_id, **prepared)
         if self._get(job_id)['status'] not in RESUMABLE or self._stop.is_set():
             raise RuntimeError('أُلغي فتح المتصفح؛ المهمة متوقفة.')
-        result = self._browser_rpc(job_id, {'action': 'start', 'url': pending_url(job, self._path(job_id))})
+        result = self._browser_rpc(job_id, {'action': 'start', 'url': pending_url(job, self._path(job_id)), **self._account_browser_input(job)})
         self._browser_job = job_id; self._browser_deadline = time.monotonic() + 1800
         attempt = {**job.get('browser_recovery_attempt', {}), 'state': result.get('state', 'awaiting_verification')}
         self.store.update_job(job_id, browser_session_enabled=True, browser_recovery_attempt=attempt,
@@ -441,7 +516,7 @@ class JobManager:
         return result
 
     def browser_action(self, job_id, payload):
-        if not isinstance(payload,dict) or payload.get('action') not in {'start','stop','frame','click','key','text','scroll','verify'}:
+        if not isinstance(payload,dict) or payload.get('action') not in {'start','stop','frame','click','key','text','scroll','verify','login'}:
             raise ValueError('طلب المتصفح غير صالح.')
         def operation():
             job=self._get(job_id)
@@ -452,6 +527,9 @@ class JobManager:
                 if set(payload)!={'action'}:raise ValueError('طلب بدء المتصفح غير صالح.')
                 if job['mode']!='html' or job.get('network_mode','direct')=='direct':raise RuntimeError('اختر HTML وملف VPN معزولًا لهذه المهمة أولًا.')
                 result=self._open_browser(job)
+            elif action=='login':
+                if set(payload)!={'action'}:raise ValueError('طلب تسجيل الدخول غير صالح.')
+                result=self._shodan_login(job)
             else:
                 result=self._browser_rpc(job_id,payload)
                 self.store.update_job(job_id, browser_recovery_attempt={**job.get('browser_recovery_attempt', {}),
@@ -498,7 +576,8 @@ class JobManager:
             from .browser_recovery import pending_url
             try:
                 result = self._browser_rpc(job['id'], {'action': 'start',
-                    'url': pending_url(self._get(job['id']), self._path(job['id'])), 'defer_navigation': True})
+                    'url': pending_url(self._get(job['id']), self._path(job['id'])), 'defer_navigation': True,
+                    **self._account_browser_input(self._get(job['id']))})
                 with self._lock:
                     stopped = self._get(job['id'])['status'] != 'waiting_input' or self._stop.is_set()
                     if not stopped:

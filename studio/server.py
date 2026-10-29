@@ -281,6 +281,17 @@ class StudioApp:
             return self.json_response(self.session_payload(session))
         if path == "/api/vpn" and method in {"GET", "HEAD"}:
             return self.json_response(self.manager.vpn.summary())
+        if path == '/api/shodan/accounts':
+            if method in {'GET','HEAD'}:return self.json_response({'accounts':self.manager.shodan_accounts.list()})
+            if method == 'POST':return self.json_response({'account':self.manager.shodan_account_save(payload)},201)
+        account_match = re.fullmatch(r'/api/shodan/accounts/([a-f0-9]{32})',path)
+        if account_match and method == 'POST':
+            if payload == {'action':'delete'}:return self.json_response(self.manager.shodan_account_delete(account_match[1]))
+            if payload.get('action')!='update':raise ValueError('عملية الحساب غير صالحة.')
+            return self.json_response({'account':self.manager.shodan_account_save({k:v for k,v in payload.items() if k!='action'},account_match[1])})
+        account_job = re.fullmatch(r'/api/jobs/([a-f0-9]{32})/shodan-account',path)
+        if account_job and method == 'POST':
+            return self.json_response({'job':self.manager.shodan_account_select(account_job[1],payload)})
         if path == "/api/vpn/discover" and method in {"GET", "HEAD"}:
             return self.json_response({"candidates": self.manager.vpn.provider.discover_profiles()})
         if path == "/api/vpn/profiles" and method == "POST":
@@ -373,6 +384,7 @@ class StudioApp:
             "/static/ip_progress.css": ("ip_progress.css", "text/css; charset=utf-8"),
             "/static/vpn.js": ("vpn.js", "text/javascript; charset=utf-8"),
             "/static/browser.js": ("browser.js", "text/javascript; charset=utf-8"),
+            "/static/accounts.js": ("accounts.js", "text/javascript; charset=utf-8"),
             "/static/vpn.css": ("vpn.css", "text/css; charset=utf-8"),
             "/favicon.svg": ("favicon.svg", "image/svg+xml"),
         }

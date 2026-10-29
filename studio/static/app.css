@@ -20,3 +20,10 @@
 /* Keep pacing readable beside the progress summary, without live announcements. */
 #wait-countdown{color:var(--cyan);font-size:13px;font-weight:600;font-variant-numeric:tabular-nums}
 #detail-source-total{color:var(--text);font-size:12px;line-height:1.9}
+
+.shodan-account-list{display:grid;gap:10px;margin:18px 0 24px}
+.shodan-account-row{display:flex;gap:16px;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:1px solid var(--line);overflow-wrap:anywhere}
+.shodan-account-row>div:first-child{display:grid;gap:5px;min-width:0}.shodan-account-row span{color:var(--muted);text-align:right}
+#shodan-account-form{display:grid;gap:16px}#browser-login-status{color:var(--text);min-height:1.5em}
+@media(max-width:600px){.shodan-account-row{align-items:flex-start;flex-direction:column}}
+#accounts-error:empty,#job-shodan-account-error:empty{display:none}

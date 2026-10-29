@@ -214,6 +214,7 @@
       state.jobs = Array.isArray(data.jobs) ? data.jobs : [];
       renderMetrics(); renderJobs(); setConnected(true);
       await ShodanVPN.refresh();
+      await ShodanAccounts.refresh();
       text("last-sync", `آخر تحديث ${new Date().toLocaleTimeString("ar", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}`);
       if (state.selectedId) await refreshDetail();
       else {
@@ -630,6 +631,7 @@
     document.addEventListener("keydown", (event) => { if (event.key === "Escape") closeSidebar(); });
     window.addEventListener("online", () => refreshAll());
   }
+  ShodanAccounts.init({api,toast,closeSidebar,refreshAll});
   ShodanVPN.init({api, toast, closeSidebar, refreshAll, openResume, runAction, currentJob: id => state.jobs.find(j => j.id === id)});
   bindEvents(); loadSession();
   window.setInterval(() => { if (!document.hidden && state.session?.authenticated) refreshAll(); }, 2000);
