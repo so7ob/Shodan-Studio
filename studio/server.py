@@ -365,6 +365,7 @@ class StudioApp:
             "/app.css": ("app.css", "text/css; charset=utf-8"),
             "/static/app.js": ("app.js", "text/javascript; charset=utf-8"),
             "/static/app.css": ("app.css", "text/css; charset=utf-8"),
+            "/static/job_guidance.js": ("job_guidance.js", "text/javascript; charset=utf-8"),
             "/static/ip_progress.js": ("ip_progress.js", "text/javascript; charset=utf-8"),
             "/static/ip_progress.css": ("ip_progress.css", "text/css; charset=utf-8"),
             "/static/vpn.js": ("vpn.js", "text/javascript; charset=utf-8"),

@@ -294,9 +294,12 @@
     const alert = attentionStatuses.has(job.status) || job.status === "failed" || job.status === "completed_warnings";
     show("job-alert", alert);
     if (alert) {
-      text("job-alert-title", job.status === "completed_warnings" ? "انتهى التنفيذ مع ملاحظات على التغطية" : job.status === "interrupted" ? "استعدنا المهمة بعد توقف الخادم" : job.status === "failed" ? "تحتاج هذه المهمة إلى مراجعة" : job.status === "paused" ? "المهمة متوقفة مؤقتًا" : "المهمة تنتظر قرارك");
-      const err = typeof job.error === "string" ? job.error : job.error?.message || job.error?.detail;
-      text("job-alert-message", err || (job.status === "completed_warnings" ? "يمكنك تنزيل النتائج والتقرير لفهم الفروع والتحذيرات المسجلة." : job.status === "interrupted" ? "التقدم المحفوظ متاح. اختر المصدر وأعد إدخال المفتاح عند الحاجة ثم استكمل." : "يمكنك استكمال المهمة بالمصدر نفسه أو الانتقال بين HTML وAPI مع الاحتفاظ بالتقدم."));
+      const guidance = ShodanJobGuidance.viewModel(job);
+      text("job-alert-title", job.status === "completed_warnings" ? "انتهى التنفيذ مع ملاحظات على التغطية" : guidance.title);
+      text("job-alert-message", job.status === "completed_warnings" ? "يمكنك تنزيل النتائج والتقرير لفهم الفروع والتحذيرات المسجلة." : guidance.message);
+      text("job-checkpoint-status", guidance.checkpoint);
+      show("job-technical-error", !!guidance.technicalError);
+      text("job-technical-error-text", guidance.technicalError);
       show("attention-action", resumableStatuses.has(job.status));
     }
     const settingsSignature = JSON.stringify([job.id, job.settings, job.mode, job.created_at, job.priority]);
@@ -439,6 +442,8 @@
     state.resumeId = id;
     const job = state.jobs.find((item) => item.id === id) || state.selectedJob;
     $("resume-form").reset(); setFormError("resume-error", "");
+    const guidance = ShodanJobGuidance.viewModel(job);
+    text("resume-description", `${guidance.message} ${guidance.checkpoint}`);
     $("resume-mode").value = ["api", "html", "auto"].includes(job?.mode) ? job.mode : "html";
     updateKeyField("resume"); openDialog("resume-dialog");
   }
