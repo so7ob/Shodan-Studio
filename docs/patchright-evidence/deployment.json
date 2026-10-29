@@ -22,5 +22,10 @@
   "test_job_id": "8d336ce1ee780b73e455a135280fdd9a",
   "test_job_status": "paused",
   "test_extraction_requests": 1,
-  "test_extracted_ips": 3
+  "test_extracted_ips": 3,
+  "archive_restore": {
+    "regular_files_restored_and_verified": 1543,
+    "link_entries_archived": 0,
+    "restored_archive_database_matches_snapshot": true
+  }
 }
