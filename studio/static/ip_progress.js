@@ -21,8 +21,12 @@
     const total = finiteCount(m.estimated_total_ips);
     const remaining = finiteCount(m.remaining_estimated_ips);
     const pct = finiteCount(m.progress_percent);
-    const displayedPct = pct === null || total === null ? null : Math.min(m.job_finished_successfully === true ? 100 : 99, pct);
+    let displayedPct = pct === null || total === null ? null : Math.min(m.job_finished_successfully === true ? 100 : 99, pct);
     const complete = m.job_finished_successfully === true;
+    const source = m.source_record_reference;
+    const referenceTotal = source && Number.isSafeInteger(source.total_records) && source.total_records > 0 ? source.total_records : null;
+    const referenceOnly = displayedPct === null && !complete && referenceTotal !== null;
+    if (referenceOnly) displayedPct = Math.min(99, Math.round(100 * extracted / referenceTotal));
     const estimate = !complete;
     const planned = Boolean(m.planning_complete);
     const completedLeaves = finiteCount(m.completed_leaves);
@@ -30,7 +34,10 @@
     const n = (x) => formatter.format(x);
     let heading = 'تقدّم استخراج عناوين IP';
     let headline, description;
-    if (total === null || displayedPct === null) {
+    if (referenceOnly) {
+      headline = `${n(extracted)} عنوان IP مستخرج / ${n(referenceTotal)} سجل متوقع`;
+      description = 'النسبة تقديرية مقارنة بإجمالي سجلات Shodan المعلن؛ قد تتكرر عناوين IP بين السجلات ويتغير الإجمالي أثناء التنفيذ.';
+    } else if (total === null || displayedPct === null) {
       headline = `${n(extracted)} عنوان IP مستخرج — الإجمالي الفريد قيد التقدير`;
       description = planned
         ? 'توجد فروع غير محسوبة؛ لا يمكن تحديد نسبة موثوقة حاليًا.'
@@ -49,6 +56,7 @@
       title: heading,
       extracted,
       total,
+      referenceTotal,
       remaining,
       percent: displayedPct,
       percentLabel: displayedPct === null ? '—' : `${displayedPct}%${estimate ? ' تقديري' : ''}`,

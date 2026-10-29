@@ -1,0 +1,36 @@
+{
+  "fixture": true,
+  "configuredDelay": 18,
+  "initialSeconds": 18,
+  "afterClockChange": 16,
+  "afterReload": 15,
+  "samples": [
+    13,
+    12,
+    11,
+    10,
+    9,
+    8,
+    7,
+    6,
+    5,
+    4,
+    3,
+    2,
+    1,
+    0,
+    null
+  ],
+  "extractedUniqueIPs": 100,
+  "sourceRecords": 579,
+  "displayedPercent": 17,
+  "rtlWidths": [
+    375,
+    1280
+  ],
+  "keyboardEntry": true,
+  "axeViolations": 0,
+  "manualScreenReader": false,
+  "shodanRequests": 0,
+  "errors": []
+}

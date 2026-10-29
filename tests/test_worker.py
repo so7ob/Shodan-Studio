@@ -186,9 +186,34 @@ class RequestPacingTests(unittest.TestCase):
                 with patch('studio.worker.time.sleep',side_effect=cancel):
                     with self.assertRaises(engine.PauseRequested):crawler.wait_for_request(30,'request_delay')
             states=[fields['stats']['request_wait'] for kind,fields in snapshots if kind=='progress']
-            self.assertEqual(states[0],{'reason':'request_delay','until':1700000030})
+            self.assertEqual(states[0],{'reason':'request_delay','until':1700000030,
+                                        'duration':30,'configured_delay':30})
             self.assertIsNone(states[-1])
             self.assertIsNone(crawler.stats()['request_wait'])
+
+    def test_snapshot_cost_counts_toward_the_published_wait(self):
+        from studio.worker import StudioCrawler, build_args
+        with tempfile.TemporaryDirectory() as folder:
+            job_dir=Path(folder)
+            job={'id':'a'*32,'query':'fixture','mode':'html','settings':{'delay':18,'demo':True}}
+            crawler=StudioCrawler(build_args(job_dir,job,None),job_dir,demo=True)
+            clock=[100.0]
+            states=[]
+            def snapshot(**kwargs):
+                states.append((clock[0],crawler._request_wait))
+                if crawler._request_wait:
+                    clock[0]+=0.4  # Persisting/emitting progress takes real time.
+            def sleep(duration):
+                clock[0]+=duration
+            with patch('studio.worker.time.monotonic',side_effect=lambda:clock[0]), \
+                 patch('studio.worker.time.time',side_effect=lambda:1700000000+clock[0]-100), \
+                 patch('studio.worker.time.sleep',side_effect=sleep), \
+                 patch.object(crawler,'snapshot',side_effect=snapshot):
+                crawler.wait_for_request(18,'request_delay')
+            self.assertEqual(states[0][1]['until'],1700000018)
+            self.assertGreaterEqual(clock[0],118)
+            self.assertLess(clock[0],118.4)
+            self.assertIsNone(states[-1][1])
 
     def test_engine_labels_normal_request_pacing_without_changing_its_duration(self):
         from test_adaptive import Dataset

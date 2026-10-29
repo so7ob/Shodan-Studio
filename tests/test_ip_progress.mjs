@@ -22,6 +22,24 @@ test('no estimate is not presented as zero percent or 100%', () => {
   assert.match(vm.description, /تخطيط/);
 });
 
+test('source records give provisional numeric progress while unique total is unknown', () => {
+  const input={extracted_unique_ips:100,estimated_total_ips:null,progress_percent:null,
+    planning_complete:false,source_record_reference:{total_records:579,progress_percent:17}};
+  const vm=viewModel(input);
+  assert.equal(vm.percent,17);
+  assert.equal(vm.total,null);
+  assert.match(vm.headline,/100 عنوان IP مستخرج \/ 579 سجل متوقع/);
+  assert.match(vm.percentLabel,/تقديري/);
+  assert.match(vm.description,/قد تتكرر/);
+  assert.equal(viewModel({...input,extracted_unique_ips:600}).percent,99);
+  assert.equal(viewModel({...input,extracted_unique_ips:0}).percent,0);
+  for (const total_records of [0,-1,false,'579',Infinity,1.5]) {
+    assert.equal(viewModel({...input,source_record_reference:{total_records}}).percent,null);
+  }
+  assert.equal(viewModel({...input,estimated_total_ips:200,progress_percent:50}).percent,50);
+  assert.equal(viewModel({...input,estimated_total_ips:100,progress_percent:100,job_finished_successfully:true}).percent,100);
+});
+
 test('completed zero-IP job can show 100% without fabricated totals', () => {
   const vm = viewModel({ extracted_unique_ips: 0, estimated_total_ips: 0,
     progress_percent: 100, job_finished_successfully: true, is_estimate: false });

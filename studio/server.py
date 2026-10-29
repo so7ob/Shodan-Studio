@@ -19,6 +19,7 @@ import signal
 from socketserver import ThreadingMixIn
 import sys
 import threading
+import time
 from typing import Any
 from urllib.parse import parse_qs, quote, urlsplit
 from wsgiref.simple_server import WSGIRequestHandler, WSGIServer, make_server
@@ -113,6 +114,7 @@ class StudioApp:
             print(f"Shodan Studio request failed ({type(exc).__name__}).", file=sys.stderr)
             status, body, content_type = self.error(500, "تعذر إتمام الطلب. راجع حالة الخادم.", "server_error")
         headers.extend([
+            ("X-Studio-Server-Time", f"{time.time():.6f}"),
             ("Content-Type", content_type), ("Content-Length", str(len(body))),
             ("Cache-Control", "no-store"), ("Pragma", "no-cache"),
             ("X-Content-Type-Options", "nosniff"), ("X-Frame-Options", "DENY"),

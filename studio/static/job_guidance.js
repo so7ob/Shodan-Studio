@@ -8,6 +8,25 @@
     const deadline = seconds * 1000;
     return Number.isFinite(new Date(deadline).getTime()) ? deadline : null;
   }
+  function createServerClock(monotonic = () => performance.now(), wall = () => Date.now()) {
+    let anchor = null, lastRequest = -Infinity;
+    return {
+      observe(value, requestStarted, received = monotonic()) {
+        if (typeof value !== "string" || !/^\d+(?:\.\d+)?$/.test(value)) return false;
+        const server = Number(value) * 1000;
+        if (!Number.isFinite(server) || !Number.isFinite(new Date(server).getTime()) || server <= 0 ||
+            !Number.isFinite(requestStarted) || !Number.isFinite(received) || received < requestStarted ||
+            requestStarted < lastRequest) return false;
+        // Slow responses can carry a stale timestamp. Keep the existing anchor.
+        if (anchor && received - requestStarted > 2000) return false;
+        // Network jitter must not make the countdown run backwards on a poll.
+        const projected = anchor ? anchor.server + Math.max(0, received - anchor.received) : server;
+        anchor = { server:Math.max(server, projected), received }; lastRequest = requestStarted;
+        return true;
+      },
+      now() { return anchor ? anchor.server + Math.max(0, monotonic() - anchor.received) : wall(); },
+    };
+  }
   function viewModel(job = {}, now = Date.now(), formatDate = value => new Date(value).toLocaleString("ar")) {
     const stats = job.stats || {};
     const raw = typeof job.error === "string" ? job.error : job.error?.message || job.error?.detail || "";
@@ -61,18 +80,26 @@
   function countdown(job = {}, now = Date.now()) {
     const stats = job.stats || {};
     if (stats.wait_unbounded || ["completed", "completed_warnings", "cancelled", "failed"].includes(job.status)) return null;
+    const configured = job.settings?.delay;
+    const hasDelay = typeof configured === "number" && Number.isFinite(configured) && configured > 0;
+    const settingLabel = hasDelay ? `فاصل الطلبات (${configured} ثانية)` : "فاصل الطلبات";
     let deadline = validatedDeadlineMs(stats), reason = "rate_limit";
     if (!(deadline > now)) {
       const wait = stats.request_wait;
-      if (job.status !== "running" || !wait || !["request_delay", "rate_limit"].includes(wait.reason)) return null;
+      if (job.status !== "running") return null;
+      if (!wait || !["request_delay", "rate_limit"].includes(wait.reason)) {
+        return hasDelay ? { seconds:null, reason:"configured_delay", text:settingLabel } : null;
+      }
       deadline = validatedDeadlineMs({ wait_until: wait.until }); reason = wait.reason;
+      if (deadline === null) return hasDelay ? { seconds:null, reason:"configured_delay", text:settingLabel } : null;
     }
-    if (!(deadline > now)) return null;
-    const seconds = Math.ceil((deadline - now) / 1000);
+    let seconds = Math.max(0, Math.ceil((deadline - now) / 1000));
+    // A normal delay can never exceed the job setting. Retry-After is separate.
+    if (reason === "request_delay" && hasDelay) seconds = Math.min(seconds, Math.ceil(configured));
     const clock = `${Math.floor(seconds / 3600) ? `${Math.floor(seconds / 3600)}:` : ""}${String(Math.floor(seconds / 60) % 60).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
-    const label = reason === "request_delay" ? "فاصل الطلبات — الطلب التالي بعد" : "مهلة تقييد الطلبات — المتبقي";
+    const label = reason === "request_delay" ? `${settingLabel} — ${seconds ? 'الطلب التالي بعد' : 'حان موعد الطلب التالي'}` : "مهلة تقييد الطلبات — المتبقي";
     return { seconds, reason, text: `${label} \u2066${clock}\u2069` };
   }
-  if (typeof module === "object" && module.exports) module.exports = { viewModel, validatedDeadlineMs, countdown };
-  else root.ShodanJobGuidance = { viewModel, validatedDeadlineMs, countdown };
+  if (typeof module === "object" && module.exports) module.exports = { viewModel, validatedDeadlineMs, countdown, createServerClock };
+  else root.ShodanJobGuidance = { viewModel, validatedDeadlineMs, countdown, createServerClock };
 })(typeof globalThis !== "undefined" ? globalThis : this);
