@@ -62,6 +62,7 @@ def build_args(job_dir: Path, job: dict, key: str | None, *, ignore_checkpoint=F
     os.environ.pop("SHODAN_API_KEY", None)
     args = engine.parse_args(argv)
     args.studio_vpn_failover = can_failover(job)
+    args.studio_execution_kind = job.get('kind', 'extraction')
     args.studio_browser_job = job['id'] if job.get('browser_session_enabled') else None
     if args.studio_browser_job and (job['mode'] != 'html' or job.get('network_mode','direct') == 'direct'):
         raise engine.SpiderError('[BROWSER_SESSION] Browser extraction requires HTML and an isolated VPN.')
@@ -167,7 +168,9 @@ class StudioCrawler(engine.Crawler):
         import re
         from .vpn_client import rpc
         try:
-            result=rpc('browser_fetch',job_id=self.args.studio_browser_job,url=url)
+            from .lanes import space
+            kind = self.args.studio_execution_kind
+            result=rpc('browser_fetch',socket_path=space(kind).socket,job_id=self.args.studio_browser_job,url=url)
             if self.report.get('pages'):
                 self.report['pages'][-1].update(user_agent=result.get('user_agent', 'native browser'),
                     browser_backend=result.get('backend', 'browser'), transport='browser',http_status=result.get('http_status'))

@@ -1,5 +1,15 @@
 # Shodan Studio: IP progress adaptation
 
+## Independent execution spaces — Issue #35
+
+Reuse the operations design. Two keyboard-accessible navigation controls open
+`/extraction` and `/enrichment`; metrics, tables and creation intent follow the
+selected space. One compact status line keeps both lanes visible. The VPN manager
+and diagnostics share an explicit space selector; job controls follow the job's
+kind. Existing RTL, fonts, tokens and dialogs remain the reference. The workspace
+footer uses `--muted` to meet contrast when auditing the full workspace.
+
+
 ## Target repository and enrichment jobs — Issue #33
 
 Keep the existing Arabic RTL operations dashboard: dark, precise, compact and

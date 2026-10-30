@@ -53,14 +53,18 @@ def parse_host_html(html, ip):
     labels = {'country': 'country_name', 'city': 'city', 'organization': 'org', 'isp': 'isp', 'asn': 'asn',
               'hostnames': 'hostnames', 'domains': 'domains', 'operating system': 'os'}
     recognized = 0
+    layout_headings = {re.sub(r'\s+', '', n.text()).casefold() for n in nodes if n.tag in ('h2', 'h3')}
+    host_layout = {'generalinformation', 'openports'} <= layout_headings
     for node in nodes:
-        key = labels.get(re.sub(r'\s+', ' ', node.text()).strip().casefold()) if node.tag in ('th', 'dt', 'td') else None
+        allowed = node.tag in ('th', 'dt', 'td') or (host_layout and node.tag in ('div', 'span', 'label', 'strong'))
+        key = labels.get(re.sub(r'\s+', ' ', node.text()).strip().rstrip(':').casefold()) if allowed else None
         if not key or not node.parent: continue
         siblings = [x for x in node.parent.children if isinstance(x, engine._FacetNode)]
         position = siblings.index(node)
         value = siblings[position + 1] if position + 1 < len(siblings) else None
-        if value is None or value.tag not in ('td', 'dd'): continue
+        if value is None or value.tag not in ('td', 'dd', 'div', 'span', 'a', 'ul', 'code'): continue
         text = re.sub(r'\s+', ' ', value.text()).strip()
+        if not text or len(text) > 2000: continue
         if key in ('hostnames', 'domains'):
             children = [n.text().strip() for n in value.walk() if n.tag in ('a', 'li') and n.text().strip()]
             result[key] = children or [v for v in re.split(r'[\s,]+', text) if v]
@@ -73,11 +77,21 @@ def parse_host_html(html, ip):
                 if match: result['country_code'] = match[1].upper()
     # Service headings have both a numeric port and transport; never infer TCP
     # from an unlabelled list of ports.
+    seen_services = set()
     for node in nodes:
-        if node.tag not in ('h2', 'h3', 'h4', 'h5', 'h6'): continue
+        if node.tag not in ('h2', 'h3', 'h4', 'h5', 'h6', 'div', 'span', 'strong'): continue
         match = re.fullmatch(r'\s*(\d{1,5})\s*/\s*(tcp|udp)\s*', node.text(), re.I)
-        if not match: continue
+        if not match or not 1 <= int(match[1]) <= 65535: continue
+        identity = (int(match[1]), match[2].lower())
+        if identity in seen_services: continue
+        seen_services.add(identity)
         section = node.parent
+        ancestor = section
+        for _ in range(5):
+            if ancestor is None: break
+            if ancestor.classes() & {'service', 'service-details'} or re.fullmatch(r'port-?\d+', ancestor.attrs.get('id', '')):
+                section = ancestor; break
+            ancestor = ancestor.parent
         service = {'port': int(match[1]), 'transport': match[2].lower()}
         if section:
             times = [n.attrs.get('datetime') or n.text() for n in section.walk() if n.tag == 'time' or 'timestamp' in n.classes()]

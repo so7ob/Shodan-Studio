@@ -28,35 +28,47 @@ class VPNProvider(Protocol):
 
 
 class HelperProvider:
-    def discover_profiles(self): return rpc('discover')
-    def list_profiles(self): return rpc('profiles')
-    def get_status(self): return rpc('status')
-    def connect(self, ident): return rpc('connect', profile_id=ident)
+    def __init__(self, kind='extraction'):
+        from .lanes import space
+        self.socket = space(kind).socket
+
+    def rpc(self, operation, **fields):
+        return rpc(operation, socket_path=self.socket, **fields)
+
+    def discover_profiles(self): return self.rpc('discover')
+    def list_profiles(self): return self.rpc('profiles')
+    def get_status(self): return self.rpc('status')
+    def connect(self, ident): return self.rpc('connect', profile_id=ident)
     switch_profile = connect
-    def disconnect(self): return rpc('disconnect')
-    def health_check(self, scope='worker'): return rpc('health', scope=scope)
-    def diagnostics(self, scope='worker'): return rpc('diagnostics', scope=scope)
+    def disconnect(self): return self.rpc('disconnect')
+    def health_check(self, scope='worker'): return self.rpc('health', scope=scope)
+    def diagnostics(self, scope='worker'): return self.rpc('diagnostics', scope=scope)
     verify_tunnel = health_check
     def get_egress_ip(self): return self.health_check().get('egress_ip')
-    def restore_previous_state(self): return rpc('restore')
+    def restore_previous_state(self): return self.rpc('restore')
     def add(self, payload):
         if set(payload) == {'config', 'metadata'}:
-            return rpc('import', **payload)
+            return self.rpc('import', **payload)
         if set(payload) == {'source', 'metadata'}:
-            return rpc('import_existing', **payload)
+            return self.rpc('import_existing', **payload)
         raise ValueError('اختر ملف اتصال أو مصدرًا مكتشفًا وبياناته.')
-    def update(self, ident, meta): return rpc('update', profile_id=ident, metadata=meta)
+    def update(self, ident, meta): return self.rpc('update', profile_id=ident, metadata=meta)
     def premium(self, payload):
-        if payload == {'action': 'refresh'}: return rpc('premium_refresh')
+        if payload == {'action': 'refresh'}: return self.rpc('premium_refresh')
         if set(payload) == {'action', 'key'} and payload['action'] == 'enroll':
-            return rpc('premium_enroll', key=payload['key'])
+            return self.rpc('premium_enroll', key=payload['key'])
         raise ValueError('طلب Premium غير صالح.')
 
 
 class VPNManager:
-    def __init__(self, store, provider=None, clock=time.time):
+    def __init__(self, store, provider=None, clock=time.time, *, kind='extraction'):
         self.store = store
-        self.provider = provider or HelperProvider()
+        from .lanes import space
+        self.kind = space(kind).kind
+        self.preferred_key = 'vpn_preferred' if kind == 'extraction' else 'vpn_preferred:enrichment'
+        self.provider = provider or HelperProvider(kind)
+        with store.connection() as con:
+            con.execute('CREATE TABLE IF NOT EXISTS vpn_space_profiles (kind TEXT NOT NULL, id TEXT NOT NULL, document TEXT NOT NULL, PRIMARY KEY(kind,id))')
         self.clock = clock
         self.lock = threading.RLock()
         self._status = None
@@ -65,7 +77,7 @@ class VPNManager:
 
     def audit(self, action, *, job_id=None, previous=None, new=None, reason=None,
               verified=False, duration_ms=0, status='success'):
-        event = dict(at=utc_now(), action=action, job_id=job_id, previous_profile=previous,
+        event = dict(at=utc_now(), action=action, job_id=job_id, kind=self.kind, previous_profile=previous,
                      new_profile=new, reason=reason, verified=bool(verified),
                      duration_ms=duration_ms, status=status)
         with self.store.connection() as con:
@@ -75,17 +87,29 @@ class VPNManager:
 
     def events(self, job_id=None):
         with self.store.connection() as con:
-            sql = 'SELECT document FROM vpn_audit' + (' WHERE job_id=?' if job_id else '') + ' ORDER BY id DESC LIMIT 200'
-            return [json.loads(row[0]) for row in con.execute(sql, (job_id,) if job_id else ())]
+            sql = "SELECT document FROM vpn_audit WHERE COALESCE(json_extract(document,'$.kind'),'extraction')=?"
+            args = [self.kind]
+            if job_id:
+                sql += ' AND job_id=?'
+                args.append(job_id)
+            return [json.loads(row[0]) for row in con.execute(sql + ' ORDER BY id DESC LIMIT 200', args)]
 
     def _saved(self):
         with self.store.connection() as con:
-            return {row[0]: json.loads(row[1]) for row in con.execute('SELECT id,document FROM vpn_profiles')}
+            if self.kind == 'extraction':
+                rows = con.execute('SELECT id,document FROM vpn_profiles')
+            else:
+                rows = con.execute('SELECT id,document FROM vpn_space_profiles WHERE kind=?', (self.kind,))
+            return {row[0]: json.loads(row[1]) for row in rows}
 
     def _save(self, item):
         with self.store.connection() as con:
-            con.execute('INSERT INTO vpn_profiles(id,document) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET document=excluded.document',
-                        (item['id'], _json(item)))
+            if self.kind == 'extraction':
+                con.execute('INSERT INTO vpn_profiles(id,document) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET document=excluded.document',
+                            (item['id'], _json(item)))
+            else:
+                con.execute('INSERT INTO vpn_space_profiles(kind,id,document) VALUES(?,?,?) ON CONFLICT(kind,id) DO UPDATE SET document=excluded.document',
+                            (self.kind, item['id'], _json(item)))
 
     def profiles(self):
         old = self._saved()
@@ -104,7 +128,7 @@ class VPNManager:
             return {**cached, 'status': {**cached.get('status', {}), 'verified': False, 'busy': True},
                     'error': 'جارٍ التحقق من الاتصال؛ لم يثبت نجاح العملية بعد.'}
         try:
-            return self._summary_locked()
+            return {**self._summary_locked(), 'kind': self.kind}
         finally:
             self.lock.release()
 
@@ -130,7 +154,7 @@ class VPNManager:
                 for p in profiles: p.update(status='unknown', health='unknown')
                 result = dict(available=False, profiles=profiles, status={}, error=str(exc))
             with self.store.connection() as con:
-                preferred = con.execute("SELECT value FROM settings WHERE name='vpn_preferred'").fetchone()
+                preferred = con.execute("SELECT value FROM settings WHERE name=?", (self.preferred_key,)).fetchone()
             result['preferred_profile'] = preferred[0] if preferred else None
             result['events'] = self.events()
             self._status, self._status_at = result, self.clock()
@@ -221,7 +245,7 @@ class VPNManager:
             if not any(p['id'] == ident and p['enabled'] for p in self.profiles()):
                 raise ValueError('ملف VPN غير متاح.')
             with self.store.connection() as con:
-                con.execute("INSERT INTO settings(name,value) VALUES('vpn_preferred',?) ON CONFLICT(name) DO UPDATE SET value=excluded.value", (ident,))
+                con.execute("INSERT INTO settings(name,value) VALUES(?,?) ON CONFLICT(name) DO UPDATE SET value=excluded.value", (self.preferred_key, ident))
             self.audit('preferred_profile', new=ident)
             self.invalidate()
             return {'preferred_profile': ident}

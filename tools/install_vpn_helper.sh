@@ -14,9 +14,10 @@ done
 python3 - "$STUDIO_VPN_SOURCE" <<'PY'
 import ast,pathlib,sys
 root=pathlib.Path(sys.argv[1])
-for name in ('vpn_helper','vpn_client','vpn_probe','vpn_config','vpn','vpn_schema','premium'):
+for name in ('vpn_helper','vpn_client','vpn_probe','vpn_config','vpn','vpn_schema','premium','lanes'):
     ast.parse((root/'studio'/f'{name}.py').read_text(), feature_version=(3,11))
 assert (root/'deploy/shodan-studio-vpn.service').is_file()
+assert (root/'deploy/shodan-studio-enrichment-vpn.service').is_file()
 assert (root/'deploy/shodan-studio-vpn.conf').is_file()
 print('Helper source/unit syntax present. No network changes performed.')
 PY
@@ -28,14 +29,19 @@ if ! getent passwd shodan-vpn-gateway >/dev/null; then
   useradd --system --user-group --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin shodan-vpn-gateway
 fi
 [[ "$(id -u shodan-vpn-gateway)" != 0 && "$(id -u shodan-vpn-gateway)" != "$(id -u shodan-studio)" ]] || { echo 'Gateway requires a separate unprivileged UID.' >&2; exit 1; }
-for STUDIO_VPN_PATH in /etc/shodan-studio /etc/shodan-studio/vpn /etc/netns /run/netns /run/amneziawg; do
+for STUDIO_VPN_PATH in /etc/shodan-studio /etc/shodan-studio/vpn /etc/shodan-studio/vpn-enrichment /etc/netns /run/netns /run/amneziawg; do
   [[ ! -L "$STUDIO_VPN_PATH" ]] || { echo 'Refusing a symlinked helper path.' >&2; exit 1; }
 done
 install -d -o root -g root -m 0755 /etc/shodan-studio /etc/netns /etc/tmpfiles.d
-install -d -o root -g root -m 0700 /etc/shodan-studio/vpn /etc/shodan-studio/vpn/profiles
+install -d -o root -g root -m 0700 /etc/shodan-studio/vpn /etc/shodan-studio/vpn/profiles /etc/shodan-studio/vpn-enrichment /etc/shodan-studio/vpn-enrichment/profiles
+if getent passwd shodan-browser >/dev/null; then
+  [[ ! -L /var/lib/shodan-studio-enrichment-browser ]] || exit 1
+  install -d -o root -g shodan-browser -m 0710 /var/lib/shodan-studio-enrichment-browser
+fi
 install -m 0644 "$STUDIO_VPN_SOURCE/deploy/shodan-studio-vpn.conf" /etc/tmpfiles.d/shodan-studio-vpn.conf
 systemd-tmpfiles --create /etc/tmpfiles.d/shodan-studio-vpn.conf
 install -m 0644 "$STUDIO_VPN_SOURCE/deploy/shodan-studio-vpn.service" /etc/systemd/system/shodan-studio-vpn.service
+install -m 0644 "$STUDIO_VPN_SOURCE/deploy/shodan-studio-enrichment-vpn.service" /etc/systemd/system/shodan-studio-enrichment-vpn.service
 systemctl daemon-reload
-if [[ "$STUDIO_VPN_START" == 1 ]]; then systemctl enable --now shodan-studio-vpn.service; fi
+if [[ "$STUDIO_VPN_START" == 1 ]]; then systemctl enable --now shodan-studio-vpn.service shodan-studio-enrichment-vpn.service; fi
 printf 'VPN helper installed; no VPN profile was connected.\n'

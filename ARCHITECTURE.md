@@ -1,5 +1,41 @@
 # Shodan Studio 1.5.0 — architecture
 
+## Independent execution spaces — Issue #35
+
+`JobManager` coordinates two execution lanes sharing one database and ownership
+lock. Each lane claims only its job kind through an indexed query (missing kind
+means extraction), owns its process/control state, and can wait for a browser or
+VPN without blocking the other lane. Shutdown requests both checkpoints before
+joining either worker. HTML request discoveries wake automatic enrichment during
+extraction; API search snapshots are saved before automatic enrichment is seeded.
+Target manifests freeze on first claim and automatic reservations remain unique.
+
+`lanes.py` defines fixed names, paths and sockets; clients cannot supply them.
+Extraction retains `ssvpn-worker`/`ssvpn0` and its original service. Enrichment
+uses `ssvpn-enrichment`/`ssenrich0`, `shodan-studio-enrichment-vpn.service`, a
+separate private configuration directory and separate Chromium profile root.
+Both retain namespace-only routing/firewall rules and the browser egress guard.
+VPN health, preferred connections, failover, audit, browser leases and cookie
+folders are scoped by lane. A cross-service flock prevents using the same peer
+key simultaneously in both spaces; host-key reuse is still rejected.
+
+Premium enrollment links subscription access/catalog locally to a persisted new
+device UUID for enrichment; it never copies the other lane's tunnel/private key.
+Profile aliases stay compatible with inherited job policies. Gateway limits and
+retry deadlines still apply, including copied account cooldown on initial link.
+A separate slot is needed for simultaneous Premium connections. Static profiles
+must be independently provisioned in the enrichment space. Missing connectivity
+pauses only the affected job. Shared account edits/removal exclude both lanes;
+credential removal clears scoped browser profiles through both helpers.
+
+`/extraction` and `/enrichment` render distinct Arabic workspaces. The latter has
+`/api/enrichment/jobs` and `/api/enrichment/vpn/...` routes; the original APIs and
+old job/checkpoint IDs remain compatible. Job-specific controls dispatch by the
+persisted kind. Every API keeps the existing authentication and CSRF checks.
+Host verification accepts labelled table or div layouts and nested service
+headings without requiring CSS, while retaining exact IP/URL, HTTP and challenge
+gates. See `docs/ENRICHMENT_SPACES_AR.md` for installation and evidence limits.
+
 ## Cross-job inventory and enrichment — Issue #33
 
 `targets.py` owns additive SQLite inventory, discovery evidence, immutable host
@@ -10,9 +46,9 @@ query, source and time within the same observation. Lists use SQL pagination and
 exports use one bounded read snapshot; dashboard polling never contacts Shodan.
 
 Jobs have `kind=extraction|enrichment` (legacy default: extraction). Enrichment
-shares the scheduler, worker process entrypoint, controls, pacing/rate-limit
-implementation, request history, VPN helper lease, accounts and interactive
-browser. Its adapter reads validated Shodan host pages or the host API and stores
+shares the worker entrypoint, controls, pacing/rate-limit implementation, request
+history and account vault. Extraction and enrichment each have their own
+scheduler thread, active worker, network operations and interactive browser lease. Its adapter reads validated Shodan host pages or the host API and stores
 allowlisted metadata rather than raw banners. The browser resource validator
 accepts canonical host URLs as well as the existing facet URLs; verification
 must parse the exact requested resource. Enrichment preserves a separate source
@@ -42,7 +78,7 @@ multi-tenant service.
 |---|---|
 | `studio/server.py` | WSGI routes, setup/login/session/CSRF/Host checks, static files, HTTP listener |
 | `studio/store.py` | SQLite WAL, atomic queue claims, events, password/session hashing |
-| `studio/jobs.py` | One-worker scheduler, typed actions, memory-only keys, exports and checkpoint import |
+| `studio/jobs.py` | Two independent job schedulers, typed actions, memory-only keys, exports and checkpoint import |
 | `studio/worker.py` | Isolated process adapting the collection engine into structured events and controls |
 | `studio/engine.py` | ShodanSpider source-resume core and legacy traversal |
 | `studio/adaptive.py` | Bounded cost-based partition selection, direct IP probing and deterministic cache replay |
@@ -53,7 +89,7 @@ multi-tenant service.
 ## Job lifecycle
 
 New tasks enter `queued`, unless an explicit API task needs a key. The scheduler
-atomically claims one task and launches `python3 -m studio.worker`. Its input is a
+atomically claims one task of its own kind and launches `python3 -m studio.worker`. Its input is a
 JSON object sent through stdin. User queries are data, never executable commands.
 The API key is omitted from the process command line, persistent job document,
 event log, checkpoint and exports. The server keeps keys in process memory; a
@@ -170,7 +206,7 @@ namespace then drops privileges before launching the existing worker. Neither
 curl nor Python gets a host network fallback. `vpn_probe.py` has fixed, bounded
 probes. Metadata migration is additive and backup-first (`vpn_schema.py`).
 
-The existing one-worker queue remains authoritative. Bounded request retries
+Each execution space has one worker and an independent VPN helper lease. Bounded request retries
 occur at the engine request boundary and retain budget accounting. Switching
 occurs only after worker exit/atomic checkpoint persistence. Failed health,
 profile cooldowns, allowlists, and a persisted lifetime switch budget govern

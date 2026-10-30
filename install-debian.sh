@@ -94,7 +94,7 @@ try:
     required = ["studio/server.py", "studio/jobs.py", "studio/worker.py", "studio/engine.py", "studio/ip_progress.py",
                 "studio/static/index.html", "studio/static/app.js", "studio/static/app.css",
                 "studio/static/ip_progress.js", "studio/static/ip_progress.css",
-                "studio/vpn.py", "studio/vpn_helper.py", "studio/vpn_schema.py",
+                "studio/vpn.py", "studio/vpn_helper.py", "studio/vpn_schema.py", "studio/lanes.py",
                 "studio/browser_recovery.py", "studio/patchright_session.py", "deploy/browser-requirements.txt",
                 "studio/static/vpn.js", "studio/static/vpn.css",
                 "deploy/shodan-studio.service", "start.sh"]

@@ -20,7 +20,8 @@ if ! getent passwd shodan-browser >/dev/null; then
 fi
 [[ "$(id -u shodan-browser)" != 0 && "$(id -u shodan-browser)" != "$(id -u shodan-studio)" ]]
 [[ ! -L /var/lib/shodan-studio-browser ]]
-install -d -o root -g shodan-browser -m 0710 /var/lib/shodan-studio-browser
+[[ ! -L /var/lib/shodan-studio-enrichment-browser ]]
+install -d -o root -g shodan-browser -m 0710 /var/lib/shodan-studio-browser /var/lib/shodan-studio-enrichment-browser
 if [[ "${1:-}" == --patchright ]]; then
  STUDIO_BROWSER_RUNTIME=/opt/shodan-studio/browser-runtime
  [[ ! -L "$STUDIO_BROWSER_RUNTIME" ]]

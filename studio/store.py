@@ -59,6 +59,8 @@ class Store:
                     document TEXT NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS jobs_queue ON jobs(status,priority DESC,created_at);
+                CREATE INDEX IF NOT EXISTS jobs_kind_queue ON jobs(
+                    COALESCE(json_extract(document,'$.kind'),'extraction'),status,priority DESC,created_at);
                 CREATE TABLE IF NOT EXISTS job_ips (
                     job_id TEXT NOT NULL, ip TEXT NOT NULL,
                     PRIMARY KEY(job_id,ip),
@@ -249,10 +251,18 @@ class Store:
             con.commit()
         return job
 
-    def claim_next(self, job_id=None) -> dict[str, Any] | None:
+    def claim_next(self, job_id=None, *, kind=None) -> dict[str, Any] | None:
+        if kind is not None:
+            from .lanes import space
+            space(kind)
         with self.connection() as con:
             con.execute("BEGIN IMMEDIATE")
-            rows = con.execute("SELECT id,document FROM jobs WHERE status='queued' ORDER BY priority DESC,created_at").fetchall()
+            sql = "SELECT id,document FROM jobs WHERE status='queued'"
+            args = []
+            if kind is not None:
+                sql += " AND COALESCE(json_extract(document,'$.kind'),'extraction')=?"
+                args.append(kind)
+            rows = con.execute(sql + ' ORDER BY priority DESC,created_at', args).fetchall()
             for row in rows:
                 if job_id is not None and row['id'] != job_id: continue
                 job = json.loads(row["document"])

@@ -10,6 +10,7 @@ User=root
 Group=root
 WorkingDirectory=/opt/shodan-studio/current
 ExecStart=/usr/bin/python3 -s -m studio.vpn_helper
+Environment=SHODAN_STUDIO_EXECUTION_SPACE=extraction
 Environment=PYTHONUNBUFFERED=1
 Environment=PYTHONDONTWRITEBYTECODE=1
 EnvironmentFile=-/etc/default/shodan-studio-browser

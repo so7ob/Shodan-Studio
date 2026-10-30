@@ -6,7 +6,7 @@
   const serverClock = ShodanJobGuidance.createServerClock();
   const state = {
     session: null, jobs: [], selectedId: null, selectedJob: null,
-    view: "all", tab: "overview", lastEvent: 0, events: [],
+    space: location.pathname === "/enrichment" ? "enrichment" : "extraction", lanes: {}, view: "all", tab: "overview", lastEvent: 0, events: [],
     results: { items: [], total: 0, offset: 0, limit: 100, q: "" },
     polling: false, connected: true, tableSignature: "", actionSignature: "",
     settingsSignature: "", resultsCount: -1, resumeId: null, cancelId: null,
@@ -167,10 +167,16 @@
     if (view === "failed") return ["failed", "cancelled"].includes(job.status);
     return true;
   }
+  function spaceJobs() { return state.jobs.filter(j => (j.kind || 'extraction') === state.space); }
   function renderMetrics() {
-    const jobs = state.jobs;
+    const jobs = spaceJobs();
+    ['extraction','enrichment'].forEach(kind => text('space-' + kind + '-count', fmt(state.jobs.filter(j => (j.kind || 'extraction') === kind).length)));
+    text('execution-spaces-status', ['extraction','enrichment'].map(kind => {
+      const lane = state.lanes[kind] || {}, label = kind === 'enrichment' ? 'الإثراء' : 'الاستخراج';
+      return `${label}: ${lane.active_job_id ? 'قيد التنفيذ' : lane.network_busy ? 'جارٍ فحص الاتصال' : lane.browser_job_id ? 'بانتظار المتصفح' : 'متاح'} · ${fmt(lane.queued || 0)} في الطابور`;
+    }).join(' | '));
     text("metric-jobs", fmt(jobs.length));
-    text("metric-ips", fmt(jobs.filter(j => j.kind !== 'enrichment').reduce((sum, j) => sum + safeNum(getStats(j).unique_ips), 0)));
+    text("metric-ips", fmt(jobs.reduce((sum, j) => sum + safeNum(getStats(j).unique_ips), 0)));
     text("metric-running", fmt(jobs.filter((j) => activeStatuses.has(j.status)).length));
     text("metric-requests", fmt(jobs.reduce((sum, j) => sum + safeNum(getStats(j).requests), 0)));
     text("metric-completed", `${fmt(jobs.filter((j) => finishedStatuses.has(j.status)).length)} مكتملة`);
@@ -181,11 +187,11 @@
   }
   function renderJobs(force = false) {
     const query = $("job-search").value.trim().toLocaleLowerCase();
-    const kind = $("job-kind-filter")?.value || 'all';
+    const kind = state.space;
     const jobs = state.jobs.filter((job) => (kind === 'all' || (job.kind || 'extraction') === kind) && matchesView(job, state.view) && (!query || `${job.title || ""} ${job.query || ""}`.toLocaleLowerCase().includes(query)));
     text("jobs-count", fmt(jobs.length));
-    show("jobs-empty", state.jobs.length === 0);
-    show("jobs-no-match", state.jobs.length > 0 && jobs.length === 0);
+    show("jobs-empty", spaceJobs().length === 0);
+    show("jobs-no-match", spaceJobs().length > 0 && jobs.length === 0);
     show("jobs-table-wrap", jobs.length > 0);
     const signature = JSON.stringify([state.selectedId, jobs]);
     if (!force && signature === state.tableSignature) return;
@@ -202,6 +208,28 @@
     });
     if (focusId) Array.from($("jobs-body").querySelectorAll("[data-job]")).find((node) => node.dataset.job === focusId)?.focus({ preventScroll: true });
   }
+  function setSpace(kind, updateURL = true) {
+    const previousSpace = state.space;
+    state.space = kind === 'enrichment' ? 'enrichment' : 'extraction';
+    if (previousSpace !== state.space) {
+      state.selectedId = null; state.selectedJob = null; show('job-detail', false);
+    }
+    if (updateURL) history.pushState({}, '', '/' + state.space);
+    document.querySelectorAll('[data-space]').forEach(el => {
+      el.classList.toggle('active', el.dataset.space === state.space);
+      if (el.dataset.space === state.space) el.setAttribute('aria-current', 'page'); else el.removeAttribute('aria-current');
+    });
+    text('space-heading', state.space === 'enrichment' ? 'مهام الإثراء' : 'مهام الاستخراج');
+    text('jobs-title', state.space === 'enrichment' ? 'طابور الإثراء' : 'مهام البحث');
+    text('metric-ips-description', state.space === 'enrichment' ? 'العناوين المعالجة في مهام الإثراء' : 'مجموع العناوين الفريدة داخل كل مهمة');
+    $('create-button').innerHTML = state.space === 'enrichment' ? 'اختيار أهداف للإثراء' : icon('plus') + 'مهمة جديدة';
+    const empty = $('jobs-empty');
+    empty.querySelector('h3').textContent = state.space === 'enrichment' ? 'لا توجد مهام إثراء بعد' : 'ابدأ أول عملية بحث';
+    empty.querySelector('p').textContent = state.space === 'enrichment' ? 'اختر أهدافًا من المستودع. يعمل الإثراء بالتوازي مع مهام الاستخراج.' : 'أضف استعلام Shodan، واختر طريقة الجمع. ستظهر هنا حالة المهمة وعناوينها فور بدء التنفيذ.';
+    $('empty-create').textContent = state.space === 'enrichment' ? 'اختيار أهداف للإثراء' : 'إنشاء مهمة';
+    empty.querySelector('.empty-workflow').hidden = state.space === 'enrichment';
+    renderMetrics(); setView('all');
+  }
   function setView(view) {
     ShodanTargets.workspace();
     ShodanVPN.workspace();
@@ -209,7 +237,7 @@
     $("job-filter").value = view;
     document.querySelectorAll("[data-view]").forEach((node) => node.classList.toggle("active", node.dataset.view === view));
     const labels = { all: "لوحة التحكم", active: "المهام النشطة", attention: "بانتظار المتابعة", completed: "المهام المكتملة", failed: "المهام المتعثرة والملغاة" };
-    text("breadcrumb-current", labels[view]);
+    text("breadcrumb-current", (state.space === 'enrichment' ? 'الإثراء · ' : 'الاستخراج · ') + labels[view]);
     renderJobs(true);
     closeSidebar();
   }
@@ -219,6 +247,7 @@
     try {
       const data = await api("/api/jobs");
       state.jobs = Array.isArray(data.jobs) ? data.jobs : [];
+      state.lanes = data.lanes || {};
       renderMetrics(); renderJobs(); setConnected(true);
       await ShodanVPN.refresh();
       await ShodanAccounts.refresh();
@@ -235,6 +264,9 @@
     } finally { state.polling = false; }
   }
   async function selectJob(id, scroll = true) {
+    let selected = state.jobs.find(j => j.id === id);
+    if (!selected) { const response = await api(jobURL(id)); selected = response.job || response; }
+    if (selected && (selected.kind || 'extraction') !== state.space) setSpace(selected.kind || 'extraction');
     if (id !== state.selectedId) {
       ShodanRequests.select(id);
       state.selectedId = id; state.selectedJob = null; state.lastEvent = 0; state.events = [];
@@ -451,7 +483,8 @@
     if (!dialog.open) dialog.showModal();
   }
   function openCreate(options = {}) {
-    $("create-form").reset(); ShodanVPN.prepareCreate(); setFormError("create-error", "");
+    if (state.space === 'enrichment' && !options.enrichment) { ShodanTargets.open(); return; }
+    $("create-form").reset(); ShodanVPN.prepareCreate(options.enrichment ? 'enrichment' : 'extraction'); setFormError("create-error", "");
     state.enrichmentSelection = options.enrichment || null;
     const fields = $('create-form').elements, enrichment = !!state.enrichmentSelection;
     fields.demo.checked = enrichment ? !!options.demo : !!state.session?.demo;
@@ -560,10 +593,11 @@
     });
     $("menu-button").addEventListener("click", () => { $("sidebar").classList.add("open"); show("sidebar-backdrop", true); $("menu-button").setAttribute("aria-expanded", "true"); });
     $("sidebar-backdrop").addEventListener("click", closeSidebar);
+    document.querySelectorAll('[data-space]').forEach(button => button.addEventListener('click', () => { setSpace(button.dataset.space); $('space-heading').focus(); }));
+    window.addEventListener('popstate', () => setSpace(location.pathname === '/enrichment' ? 'enrichment' : 'extraction', false));
     document.querySelectorAll("[data-view]").forEach((button) => button.addEventListener("click", () => setView(button.dataset.view)));
     $("job-filter").addEventListener("change", () => setView($("job-filter").value));
     $("job-search").addEventListener("input", () => renderJobs(true));
-    $('job-kind-filter').addEventListener('change', () => renderJobs(true));
     $("refresh-button").addEventListener("click", () => refreshAll(true));
     ["create-button", "empty-create"].forEach((id) => $(id).addEventListener("click", openCreate));
     $("jobs-body").addEventListener("click", (event) => { const row = event.target.closest("[data-job]"); if (row) selectJob(row.dataset.job); });
@@ -677,8 +711,8 @@
   ShodanRequests.init({api,copyText});
   ShodanAccounts.init({api,toast,closeSidebar,refreshAll});
   ShodanVPN.init({api, toast, closeSidebar, refreshAll, openResume, runAction, currentJob: id => state.jobs.find(j => j.id === id)});
-  ShodanTargets.init({api,toast,closeSidebar,refreshAll,openCreate,selectJob,setView});
-  bindEvents(); loadSession();
+  ShodanTargets.init({api,toast,closeSidebar,refreshAll,openCreate,selectJob,setView,setSpace});
+  bindEvents(); setSpace(state.space, false); loadSession();
   window.setInterval(() => { if (!document.hidden && state.session?.authenticated) refreshAll(); }, 2000);
   window.setInterval(updateCountdown, 1000);
 })();

@@ -165,7 +165,8 @@ class SourceRecoveryTests(unittest.TestCase):
         with patch('studio.vpn_client.rpc', return_value={'html': HOST_HTML, 'http_status': 200, 'backend': 'patchright', 'user_agent': 'Fixture browser'}) as rpc:
             events, api, http = self.run_fixture(mode='html')
         self.assertEqual(events[-1]['status'], 'completed')
-        rpc.assert_called_once_with('browser_fetch', job_id=self.job['id'], url='https://www.shodan.io/host/8.8.8.8')
+        rpc.assert_called_once_with('browser_fetch', socket_path='/run/shodan-studio-enrichment-vpn/control.sock',
+                                  job_id=self.job['id'], url='https://www.shodan.io/host/8.8.8.8')
         api.assert_not_called(); http.assert_not_called()
 
     def test_import_normalizes_equivalent_ipv6_checkpoint_addresses(self):

@@ -7,11 +7,13 @@ window.ShodanVPN = (() => {
   const health = {healthy:'سليم',unhealthy:'غير سليم',unknown:'غير مختبر',host_route:'مسار الخادم'};
   const statuses = {connected:'متصل ومتحقق',disconnected:'غير متصل',unverified:'لم يُتحقق',unknown:'غير معروف'};
   let ctx, snapshot = {profiles:[],status:{}}, editing = null, job = null, loading = false, view = null;
-  let reports = {}, pending = false;
+  const snapshots = {extraction:snapshot, enrichment:{profiles:[],status:{}}};
+  let vpnSpace = 'extraction', reports = {}, pending = false;
   const country = code => { try { return code ? new Intl.DisplayNames(['ar'], {type:'region'}).of(code) : 'غير محددة'; } catch { return code || 'غير محددة'; } };
   const time = value => value ? new Date(typeof value === 'number' ? value * 1000 : value).toLocaleString('ar') : '—';
   const profile = id => snapshot.profiles.find(p => p.id === id);
-  const post = (url, body) => ctx.api(url, {method:'POST', body:JSON.stringify(body)});
+  const endpoint = url => vpnSpace === 'enrichment' && url.startsWith('/api/vpn') ? url.replace('/api/vpn','/api/enrichment/vpn') : url;
+  const post = (url, body) => ctx.api(endpoint(url), {method:'POST', body:JSON.stringify(body)});
   async function perform(button, fn) {
     if (pending) return;
     pending = true;
@@ -27,13 +29,14 @@ window.ShodanVPN = (() => {
       <p class="muted small-text">Direct يتبع شبكة الخادم الحالية، وقد تكون متصلة بـ Amnezia. Failover يبدّل بعد حفظ التقدم، ويحتفظ بمهلة انتظار المصدر.</p>`;
   }
   function fillOptions(prefix, values) {
-    const options = snapshot.profiles.filter(p => p.enabled);
+    const data = snapshots[prefix === 'create-net' ? ($('create-form').dataset.space || 'extraction') : (job?.kind || 'extraction')];
+    const options = data.profiles.filter(p => p.enabled);
     const single = $(`${prefix}-profile`), multi = $(`${prefix}-allowed`);
     const selected = values?.preferred_vpn_profile ?? single.value ?? '';
     const allowed = values?.allowed_vpn_profiles ?? [...multi.selectedOptions].map(x => x.value);
     single.innerHTML = '<option value="">اختر ملفًا</option>' + options.map(p => `<option value="${p.id}">${esc(p.name)} · ${esc(country(p.country))}</option>`).join('');
     multi.innerHTML = options.map(p => `<option value="${p.id}">${esc(p.name)} · ${esc(country(p.country))}</option>`).join('');
-    single.value = selected || snapshot.preferred_profile || '';
+    single.value = selected || data.preferred_profile || '';
     for (const option of multi.options) option.selected = allowed.includes(option.value);
     if (values) {
       $(`${prefix}-mode`).value = values.network_mode || 'direct';
@@ -59,6 +62,9 @@ window.ShodanVPN = (() => {
   function navigate(next) {
     if(next)window.ShodanTargets?.workspace();
     view = next;
+    const selector = $('vpn-space').closest('label');
+    if(next === 'diagnostics') $('diagnostics-heading').after(selector);
+    else if(next === 'vpn') $('vpn-heading').parentElement.after(selector);
     $('workspace-view').hidden = !!next;
     $('vpn-view').hidden = next !== 'vpn';
     $('diagnostics-view').hidden = next !== 'diagnostics';
@@ -87,6 +93,8 @@ window.ShodanVPN = (() => {
     $('vpn-error').textContent = snapshot.error || '';
     $('vpn-error').hidden = !snapshot.error;
     $('vpn-current').innerHTML = [
+      ['مساحة التنفيذ',vpnSpace === 'enrichment' ? 'الإثراء' : 'الاستخراج'],
+      ['العزل',status.namespace || 'غير متاح'],
       ['الاتصال الحالي', active?.name || 'لا يوجد نفق مُدار'], ['الدولة المعرّفة',country(active?.country)],
       ['عنوان الخروج (آخر تحقق)',check.egress_ip], ['البروتوكول',active?.protocol],
       ['حالة النفق',status.verified ? 'تم التحقق' : 'غير متحقق'], ['زمن الاختبار',check.latency_ms != null ? `${check.latency_ms} ms` : '—'],
@@ -114,14 +122,20 @@ window.ShodanVPN = (() => {
   async function refresh() {
     if (loading) return;
     loading = true;
-    try { snapshot = await ctx.api('/api/vpn'); render(); }
+    try {
+      await Promise.all(['extraction','enrichment'].map(async kind => {
+        try { snapshots[kind] = await ctx.api(kind === 'enrichment' ? '/api/enrichment/vpn' : '/api/vpn'); }
+        catch(error) { snapshots[kind] = {...snapshots[kind],error:error.message}; }
+      }));
+      snapshot = snapshots[vpnSpace]; render();
+    }
     catch (error) { $('vpn-error').textContent = error.message; $('vpn-error').hidden = false; }
     finally { loading = false; }
   }
   function renderJob(value) {
     job = value;
     ShodanBrowser.render(value);
-    const p = profile(job.active_vpn_profile || job.preferred_vpn_profile);
+    const p = snapshots[job.kind || 'extraction'].profiles.find(p => p.id === (job.active_vpn_profile || job.preferred_vpn_profile));
     $('job-network-state').textContent = `${job.network_mode || 'direct'} · ${p?.name || (job.network_mode && job.network_mode !== 'direct' ? 'ملف VPN غير متاح' : 'مسار الخادم')} · ${country(p?.country)} · ${job.current_egress_ip || 'عنوان الخروج غير متحقق'} · ${health[job.network_health] || 'غير مختبر'}`;
     $('job-network-phase').textContent = phases[job.network_phase] || '';
     $('job-network-count').textContent = `محاولات التبديل: ${job.failover_count || 0} / ${job.max_failovers ?? 20}`;
@@ -166,6 +180,13 @@ window.ShodanVPN = (() => {
   }
   function init(context) {
     ctx = context;
+    $('vpn-space').addEventListener('change', () => {
+      if(pending) { $('vpn-space').value = vpnSpace; return; }
+      vpnSpace = $('vpn-space').value; snapshot = snapshots[vpnSpace]; reports = {};
+      $('diagnostic-export').disabled = true;
+      ['host','worker'].forEach(scope => $('diagnostic-'+scope).innerHTML = `<h2>${scope === 'host' ? 'الخادم' : 'العامل المعزول'}</h2><p>لم يُجر الفحص بعد.</p>`);
+      render();
+    });
     ShodanBrowser.init(context);
     $('create-network').innerHTML = fields('create-net');
     $('job-network-fields').innerHTML = fields('job-net');
@@ -190,7 +211,7 @@ window.ShodanVPN = (() => {
       finally { $('premium-submit').disabled = false; await refresh(); }
     });
     $('vpn-discover').addEventListener('click', event => perform(event.target, async () => {
-      const result = await ctx.api('/api/vpn/discover');
+      const result = await ctx.api(endpoint('/api/vpn/discover'));
       $('vpn-profile-source').innerHTML = '<option value="">رفع ملف من جهازك</option>' + result.candidates.map(p => `<option value="${esc(p.source)}">${esc(p.name)}</option>`).join('');
       editProfile();
       if (!result.candidates.length) $('vpn-profile-error').textContent = 'لم يعثر الخادم على ملفات مرشحة. يمكنك رفع ملف Premium مُصدّر.';
@@ -240,5 +261,5 @@ window.ShodanVPN = (() => {
       const link = document.createElement('a'); link.href=url; link.download='shodan-network-diagnostics.json'; link.click(); setTimeout(() => URL.revokeObjectURL(url),1000);
     });
   }
-  return {init, refresh, renderJob, workspace:() => navigate(null), createPolicy:() => getPolicy('create-net'), prepareCreate:() => fillOptions('create-net',{network_mode:'direct'})};
+  return {init, refresh, renderJob, workspace:() => navigate(null), createPolicy:() => getPolicy('create-net'), prepareCreate:(kind='extraction') => { $('create-form').dataset.space=kind; fillOptions('create-net',{network_mode:'direct'}); }};
 })();

@@ -3,7 +3,7 @@ const fs=require('node:fs');
 const {chromium}=require('playwright');
 const {AxeBuilder}=require('@axe-core/playwright');
 (async()=>{
- const base=process.argv[2]||'http://127.0.0.1:8813',out='docs/target-repository-evidence';fs.mkdirSync(out,{recursive:true});
+ const base=process.argv[2]||'http://127.0.0.1:8813',out=process.env.STUDIO_EVIDENCE_DIR||'docs/target-repository-evidence';fs.mkdirSync(out,{recursive:true});
  const browser=await chromium.launch({headless:true,executablePath:process.env.STUDIO_TEST_CHROMIUM||undefined});
  const context=await browser.newContext({viewport:{width:1280,height:1000},reducedMotion:'reduce'});
  const page=await context.newPage();const errors=[];
@@ -50,7 +50,7 @@ const {AxeBuilder}=require('@axe-core/playwright');
   assert.match(await page.locator('#create-title').innerText(),/إثراء/);
   assert.deepEqual((await new AxeBuilder({page}).include('#create-dialog').analyze()).violations,[]);
   await page.locator('#create-form [name=delay]').fill('0');await page.locator('#create-submit').click();await page.locator('#create-dialog').waitFor({state:'hidden'});
-  await page.locator('#job-kind-filter').selectOption('enrichment');await page.locator('#jobs-body tr').first().waitFor();
+  await page.waitForURL('**/enrichment*');await page.locator('#jobs-body tr').first().waitFor();
   assert.match(await page.locator('#jobs-body').innerText(),/إثراء/);assert.match(await page.locator('#detail-ip-progress').innerText(),/عنوان عولج/);
   await page.locator('#detail-actions [data-action=configure]').click();await page.locator('#job-runtime-dialog').waitFor({state:'visible'});
   await page.locator('#job-runtime-form [name=priority]').fill('10');await page.locator('#job-runtime-form [name=delay]').fill('3');

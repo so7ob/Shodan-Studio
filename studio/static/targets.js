@@ -53,9 +53,7 @@ window.ShodanTargets = (() => {
     $('create-form').querySelector('.modal-body').prepend(summary);
     const schedule=document.createElement('label'); schedule.className='field'; schedule.innerHTML='<span>موعد بدء المهمة · اختياري، بتوقيت جهازك</span><input name="scheduled_at" type="datetime-local">';
     $('create-form').querySelector('.modal-body').append(schedule);
-    const kind=document.createElement('select'); kind.id='job-kind-filter'; kind.setAttribute('aria-label','نوع المهمة');
-    kind.innerHTML='<option value="all">كل الأنواع</option><option value="extraction">استخراج</option><option value="enrichment">إثراء</option>';
-    $('job-filter').before(kind);
+
   }
   function filterValues() {
     const result={}, data=new FormData($('targets-filter-form'));
@@ -208,5 +206,5 @@ window.ShodanTargets = (() => {
       document.querySelectorAll('[data-view]').forEach(x=>x.classList.remove('active'));$('breadcrumb-current').textContent='مستودع الأهداف';
     }
   }
-  return {init,refresh,workspace,configureJob,statusLabel:s=>statuses[s]||s};
+  return {open:show,init,refresh,workspace,configureJob,statusLabel:s=>statuses[s]||s};
 })();

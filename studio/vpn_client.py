@@ -39,6 +39,7 @@ def rpc(operation, *, socket_path=SOCKET, **fields):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--job-id', required=True)
+    parser.add_argument('--kind', choices=('extraction', 'enrichment'), default='extraction')
     args = parser.parse_args()
     from .vpn_config import profile_id
     profile_id(args.job_id)
@@ -47,7 +48,10 @@ def main():
         if len(data) > 1024 * 1024:
             raise ValueError('Worker input too large.')
         payload = json.loads(data)
-        with connect() as sock:
+        from .lanes import space
+        if payload['job'].get('kind', 'extraction') != args.kind:
+            raise ValueError('Worker space mismatch.')
+        with connect(space(args.kind).socket) as sock:
             sock.sendall(json.dumps({'op': 'run', 'job_id': args.job_id, 'payload': payload}).encode() + b'\n')
             sock.settimeout(None)
             with sock.makefile('rb') as stream:
