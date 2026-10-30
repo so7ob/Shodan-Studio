@@ -24,20 +24,22 @@ import time
 from .vpn_config import metadata, parse_profile, profile_id
 from .premium import Premium
 
-NS = 'ssvpn-worker'
-IFACE = 'ssvpn0'
+from .lanes import space
+SPACE = space(os.environ.get('SHODAN_STUDIO_EXECUTION_SPACE', 'extraction'))
+NS = SPACE.namespace
+IFACE = SPACE.interface
 IP = '/usr/sbin/ip'
 NFT = '/usr/sbin/nft'
 SETPRIV = '/usr/bin/setpriv'
 WG = '/usr/bin/wg'
 AWG = '/usr/local/libexec/shodan-studio/awg'
 GO = '/opt/AmneziaVPN/bin/amneziawg-go'
-ROOT = Path('/etc/shodan-studio/vpn')
-RUNTIME = Path('/run/shodan-studio-vpn')
+ROOT = Path(SPACE.config)
+RUNTIME = Path(SPACE.runtime)
 DATA = Path('/var/lib/shodan-studio')
 CODE = Path('/opt/shodan-studio/current')
 ENV = {'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'LANG': 'C.UTF-8',
-       'PYTHONUNBUFFERED': '1', 'PYTHONDONTWRITEBYTECODE': '1', 'HOME': '/nonexistent'}
+       'PYTHONUNBUFFERED': '1', 'PYTHONDONTWRITEBYTECODE': '1', 'HOME': '/nonexistent', 'SHODAN_STUDIO_EXECUTION_SPACE': SPACE.kind}
 
 
 def command(argv, *, data=None, timeout=15, check=True):
@@ -71,6 +73,8 @@ class Broker:
         account = pwd.getpwnam('shodan-studio')
         self.uid = account.pw_uid if uid is None else uid
         self.gid = account.pw_gid if gid is None else gid
+        self.space = SPACE
+        self._key_lease = None
         self.lock = threading.RLock()
         self.active = None
         self.previous = None
@@ -117,6 +121,8 @@ class Broker:
             fail('NETWORK')
 
     def _sync_premium(self):
+        if getattr(self, 'space', SPACE).kind == 'enrichment' and not self.premium.state.get('api_key'):
+            self.premium.link_subscription(Path(space('extraction').config))
         current = {p['id']: p for p in self.premium.profiles()}
         for ident, old in self.profiles.items():
             if old.get('provider') == 'amnezia-premium' and ident not in current:
@@ -209,6 +215,20 @@ class Broker:
             raise RuntimeError('Required official VPN tool is not installed.')
         return tool
 
+    def _reserve_key(self, public):
+        # Cross-service flock also works when systemd gives helpers separate mount
+        # namespaces. Never activate one peer identity in two spaces.
+        import fcntl
+        import hashlib
+        path = Path('/run/amneziawg') / ('studio-peer-' + hashlib.sha256(public.encode()).hexdigest() + '.lock')
+        fd = os.open(path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except (BlockingIOError, OSError):
+            os.close(fd)
+            raise RuntimeError('مفتاح النفق مستخدم في مساحة أخرى؛ اختر ملف اتصال مستقلًا.') from None
+        self._key_lease = fd
+
     def _remove_interface(self):
         if getattr(self, 'browser', None): self.browser.close()
         if self._ns_exists():
@@ -224,6 +244,10 @@ class Broker:
             self.daemon = None
         self.active = None
         self.last_check = None
+        if getattr(self, '_key_lease', None) is not None:
+            os.close(self._key_lease)
+            self._key_lease = None
+
 
     def _connect(self, ident):
         started = time.monotonic()
@@ -252,8 +276,9 @@ class Broker:
         if any(len(row.split()) == 2 and row.split()[0] != IFACE and row.split()[1] == public for row in active_keys):
             raise RuntimeError('Profile key is already used by a host tunnel; import an independent profile.')
         self._remove_interface()
-        self._ensure_ns(parsed['dns'])
+        self._reserve_key(public)
         try:
+            self._ensure_ns(parsed['dns'])
             if parsed['protocol'] == 'amneziawg':
                 self.daemon = subprocess.Popen([GO, '-f', IFACE], env=ENV,
                                                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
@@ -359,7 +384,7 @@ class Broker:
         verified = bool(self.last_check and self.last_check['healthy']
                         and time.time() - self.last_check.get('checked_at', 0) < 60 and isolation['interface_up']
                         and isolation['route_verified'] and isolation['leak_protection'])
-        return dict(active_profile=self.active, previous_profile=self.previous, interface=IFACE,
+        return dict(kind=getattr(self, 'space', SPACE).kind, active_profile=self.active, previous_profile=self.previous, interface=IFACE,
                     namespace=NS, running_job=self.running_job, last_change=self.last_change,
                     capabilities={"amneziawg": Path(AWG).is_file() and Path(GO).is_file(), "wireguard": Path(WG).is_file(), "gui_country_automation": False,
                                   "premium_subscription": True}, premium=self.premium.status(),
@@ -478,6 +503,8 @@ class Broker:
             raise ValueError('Invalid worker request.')
         ident = profile_id(request['job_id'])
         payload = request['payload']
+        if payload['job'].get('kind', 'extraction') != getattr(self, 'space', SPACE).kind:
+            raise ValueError('Worker execution space does not match helper.')
         with self.lock:
             if self.running_job:
                 raise RuntimeError('A VPN worker already owns the tunnel.')

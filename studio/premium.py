@@ -307,11 +307,25 @@ def tunnel_config(obj, private, location):
 
 class Premium:
     def __init__(self, root, *, transport=None, clock=time.time, owner=0):
+        self.owner = owner
         self.path = Path(root) / 'premium.json'
         self.state = read_private(self.path, owner)
         self.transport = transport
         self.clock = clock
         self.last_attempt = 0
+
+    def link_subscription(self, source_root):
+        """Copy subscription access/catalog, never the other device identity or keys.
+
+        Enrollment/configuration remains a normal bounded request at connect time.
+        Stable profile aliases preserve inherited policies across execution spaces.
+        """
+        if self.state.get('api_key'): return
+        source = read_private(Path(source_root) / 'premium.json', self.owner)
+        if not source.get('api_key'): return
+        self.state = {k: source[k] for k in ('api_key', 'user_country_code', 'countries', 'catalog_source', 'transport', 'last_error', 'cooldown_until', 'cooldown_unbounded') if k in source}
+        self.state.update(installation_uuid=str(uuid.uuid4()), profile_namespace=source['installation_uuid'], registered=False)
+        self.save()
 
     def save(self): private_json(self.path, self.state)
 
@@ -390,7 +404,7 @@ class Premium:
 
     def profiles(self):
         if not self.state.get('api_key'): return []
-        namespace = uuid.UUID(self.state['installation_uuid'])
+        namespace = uuid.UUID(self.state.get('profile_namespace', self.state['installation_uuid']))
         return [dict(id=uuid.uuid5(namespace, c['location']).hex, provider='amnezia-premium',
                      location=c['location'], name='Premium · ' + c['name'], country=c['country'],
                      protocol='amneziawg', enabled=c['supported'], available=c['supported'])

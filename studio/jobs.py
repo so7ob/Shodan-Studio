@@ -1,9 +1,10 @@
-"""Durable job queue and one isolated worker process at a time."""
+"""Durable extraction and enrichment queues with independent execution spaces."""
 from __future__ import annotations
 
 import contextlib
 import csv
 import fcntl
+from functools import wraps
 import io
 import ipaddress
 import json
@@ -33,12 +34,24 @@ ACTIVE = {"running", "pause_requested", "cancel_requested"}
 RESUMABLE = {"paused", "waiting_input", "interrupted", "failed"}
 
 
+def in_job_lane(method):
+    """Route job controls, including internal/test callers, to their owning lane."""
+    @wraps(method)
+    def routed(self, job, *args, **kwargs):
+        document = job if isinstance(job, dict) else self._get(job)
+        lane = self._root.lane(document.get('kind', 'extraction'))
+        return method(lane, job, *args, **kwargs)
+    return routed
+
+
 class JobManager:
-    def __init__(self, data_dir, store=None, demo=False, autostart=True):
+    def __init__(self, data_dir, store=None, demo=False, autostart=True, *, _kind='extraction', _root=None):
         self.data_dir = Path(data_dir).expanduser().resolve()
         self.store = store or Store(self.data_dir)
         self.demo = demo
-        self.vpn = VPNManager(self.store)
+        self.kind = _kind
+        self._root = _root or self
+        self.vpn = VPNManager(self.store, kind=_kind)
         from .shodan_accounts import ShodanAccounts
         self.shodan_accounts = ShodanAccounts(self.store)
         from .enrichment import EnrichmentSettings
@@ -61,8 +74,34 @@ class JobManager:
         self._browser_deadline = 0
         self._ownership = None
         self._ip_cache = {}
+        self._seed_requested = threading.Event()
+        self._seed_requested.set()
+        self._seed_lock = threading.RLock()
+        self._credential_lock = _root._credential_lock if _root else threading.RLock()
+        if _root:
+            self._keys = _root._keys
+            self._secret_history = _root._secret_history
+        else:
+            self.enrichment = JobManager(data_dir, store=self.store, demo=demo, autostart=False,
+                                         _kind='enrichment', _root=self)
         if autostart:
             self.start()
+
+    def lane(self, kind='extraction'):
+        from .lanes import space
+        space(kind)
+        return self._root.enrichment if kind == 'enrichment' else self._root
+
+    def _start_lane(self):
+        with contextlib.suppress(Exception):
+            browser = self.vpn.provider.get_status().get('browser', {})
+            job = self.store.get_job(browser.get('job_id')) if browser.get('running') else None
+            if job and job.get('kind', 'extraction') == self.kind:
+                self._browser_job = job['id']
+                self._browser_deadline = time.monotonic() + 1800
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._loop, name='studio-' + self.kind, daemon=True)
+        self._thread.start()
 
     def start(self):
         with self._lock:
@@ -93,15 +132,8 @@ class JobManager:
                     self._replay_target_events(job)
                 except (ValueError, OSError, KeyError, TypeError, engine.CheckpointError):
                     self.store.append_event(job['id'], {'kind': 'warning', 'message': 'تعذر استعادة بعض تفاصيل الأهداف؛ بقيت البيانات الأصلية محفوظة.'})
-            self._seed_enrichment()
-            with contextlib.suppress(Exception):
-                browser = self.vpn.provider.get_status().get('browser', {})
-                if browser.get('running') and self.store.get_job(browser.get('job_id')):
-                    self._browser_job = browser['job_id']
-                    self._browser_deadline = time.monotonic() + 1800
-            self._stop.clear()
-            self._thread = threading.Thread(target=self._loop, name="studio-queue", daemon=True)
-            self._thread.start()
+            self._start_lane()
+            self.enrichment._start_lane()
 
     def _path(self, job_id: str) -> Path:
         if not isinstance(job_id, str) or not re.fullmatch(r"[a-f0-9]{32}", job_id):
@@ -119,7 +151,7 @@ class JobManager:
         return job
 
     def _redact(self, value):
-        with self._lock:
+        with self._credential_lock:
             keys = list(self._secret_history)
         def visit(item):
             if isinstance(item, str):
@@ -136,10 +168,11 @@ class JobManager:
 
     def _remember(self, job_id, key):
         if key:
-            with self._lock:
+            with self._credential_lock:
                 self._keys[job_id] = key
                 self._secret_history.add(key)
 
+    @in_job_lane
     def _public(self, job):
         result = {**NETWORK_DEFAULTS, "active_vpn_profile": None, "current_egress_ip": None,
                   "network_health": "unknown", "last_network_error": None, "last_failover_at": None,
@@ -222,8 +255,9 @@ class JobManager:
             "branches": [], "planning_complete": False, "traversal_completed": False},
             updated_at=job["updated_at"])
 
-    def list_jobs(self):
-        jobs = [self._public(j) for j in self.store.list_jobs()]
+    def list_jobs(self, kind=None):
+        stored_jobs = self.store.list_jobs()
+        jobs = [self._public(j) for j in stored_jobs if kind is None or j.get('kind', 'extraction') == kind]
         summary = {
             "total": len(jobs), "running": sum(j["status"] in ACTIVE for j in jobs),
             "queued": sum(j["status"] == "queued" for j in jobs),
@@ -234,11 +268,17 @@ class JobManager:
         }
         # unique_ips is a sum across jobs, never a cross-job deduplicated union.
         summary["ip_count_scope"] = "sum_per_job"
-        return {"jobs": jobs, "summary": summary}
+        return {"jobs": jobs, "summary": summary, "lanes": {
+            kind: {'active_job_id': self.lane(kind)._active_id,
+                   'browser_job_id': self.lane(kind)._browser_job,
+                   'network_busy': self.lane(kind)._network_operation,
+                   'queued': sum(j['status'] == 'queued' and j.get('kind', 'extraction') == kind for j in stored_jobs)}
+            for kind in ('extraction', 'enrichment')}}
 
     def get_job(self, job_id):
         return self._public(self._get(job_id))
 
+    @in_job_lane
     def _new_job(self, fields, key, *, start=True):
         fields = {**NETWORK_DEFAULTS, 'kind': 'extraction', **fields}
         job_id = secrets.token_hex(16)
@@ -278,6 +318,8 @@ class JobManager:
             return self._new_job(fields, key)
 
     def _create_enrichment(self, payload, *, automatic=False, context=None):
+        if self.kind != 'enrichment':
+            return self.enrichment._create_enrichment(payload, automatic=automatic, context=context)
         allowed = {'kind', 'title', 'target_ids', 'filters', 'mode', 'api_key', 'settings', 'priority', 'network', 'scheduled_at'}
         if set(payload) - allowed: raise JobValidationError('حقول مهمة الإثراء غير صالحة.')
         if 'target_ids' in payload and 'filters' in payload: raise JobValidationError('اختر عناوين محددة أو فلاتر.')
@@ -321,7 +363,8 @@ class JobManager:
             if scheduled is None: raise JobValidationError('موعد المهمة غير صالح.')
             fields['scheduled_at'] = scheduled
         policy_error = None
-        try: self.vpn.validate_policy({k: fields[k] for k in NETWORK_DEFAULTS})
+        try:
+            if not automatic: self.vpn.validate_policy({k: fields[k] for k in NETWORK_DEFAULTS})
         except (ValueError, RuntimeError) as exc:
             if not automatic: raise
             policy_error = str(exc)
@@ -341,6 +384,11 @@ class JobManager:
             return self.get_job(job['id'])
 
     def _seed_enrichment(self):
+        lane = self.lane('enrichment')
+        with lane._seed_lock, lane._lock:
+            return lane._seed_enrichment_locked()
+
+    def _seed_enrichment_locked(self):
         if not self.enrichment_settings.public()['automatic']: return
         for group in self.store.targets.automatic_candidates():
             context = group['context']
@@ -358,7 +406,15 @@ class JobManager:
         with self.store.connection() as c:
             row = c.execute('SELECT document FROM request_history WHERE job_id=? AND request_id=?', (job_id, request_id)).fetchone()
             values = [json.loads(x[0]) for x in c.execute('SELECT document FROM request_values WHERE job_id=? AND request_id=? ORDER BY position', (job_id, request_id))]
-        if row: self.store.targets.observe_request(job, json.loads(row[0]), values)
+        if row:
+            entry = json.loads(row[0])
+            self.store.targets.observe_request(job, entry, values)
+            # API search emits its already-fetched host metadata immediately
+            # after request values. Let those snapshots land before reserving
+            # automatic enrichment; HTML results can be seeded while extracting.
+            if values and entry.get('source') == 'html':
+                self.lane('enrichment')._seed_requested.set()
+                self.lane('enrichment')._wake.set()
 
     def _target_event(self, job, event):
         repo = self.store.targets
@@ -405,6 +461,7 @@ class JobManager:
     def _control(self, job_id, action):
         atomic_text(self._path(job_id) / "control.json", json.dumps({"action": action}))
 
+    @in_job_lane
     def action(self, job_id, payload):
         if isinstance(payload, dict) and payload.get('action') == 'configure':
             if set(payload) - {'action', 'priority', 'scheduled_at', 'settings'}: raise JobValidationError('إعدادات تشغيل غير صالحة.')
@@ -524,15 +581,22 @@ class JobManager:
             try:
                 if self._browser_job and (time.monotonic() > self._browser_deadline or self._get(self._browser_job)['status'] in FINAL - {'failed'}):
                     with contextlib.suppress(Exception): self.browser_action(self._browser_job, {'action':'stop'})
+                if self.kind == 'enrichment' and self._seed_requested.is_set():
+                    self._seed_requested.clear()
+                    try: self._seed_enrichment()
+                    except Exception:
+                        self._seed_requested.set()
+                        raise
                 with self._lock:
                     if self._stop.is_set():
                         break
-                    job = None if self._network_operation else self.store.claim_next(self._browser_job)
+                    job = None if self._network_operation else self.store.claim_next(self._browser_job, kind=self.kind)
                     if job:
                         self._active_id = job["id"]
                 if job:
                     self._execute(job)
-                    self._seed_enrichment()
+                    self.lane('enrichment')._seed_requested.set()
+                    self.lane('enrichment')._wake.set()
                     with self._lock:
                         self._active_id = None
                         if self._browser_job == job['id']:
@@ -549,6 +613,7 @@ class JobManager:
             self._wake.wait(0.5)
             self._wake.clear()
 
+    @in_job_lane
     def network_settings(self, job_id, payload):
         with self._lock:
             job = self._get(job_id)
@@ -584,7 +649,28 @@ class JobManager:
 
     def _browser_rpc(self, job_id, payload):
         from .vpn_client import rpc
-        return rpc('browser', job_id=job_id, input=payload)
+        from .lanes import space
+        return rpc('browser', socket_path=space(self.kind).socket, job_id=job_id, input=payload)
+
+    def _account_mutation(self, operation):
+        # Accounts are shared; credential rotation/removal must exclude both
+        # workers and both browser profiles. Always acquire locks in this order.
+        root, child = self._root, self._root.enrichment
+        with root._lock, child._lock:
+            if any(lane._active_id or lane._network_operation or lane._browser_job for lane in (root, child)):
+                raise RuntimeError('أوقف المهام وأغلق المتصفحات في المساحتين قبل تعديل الحساب أو حذفه.')
+            root._network_operation = child._network_operation = True
+        try:
+            return operation()
+        finally:
+            with root._lock, child._lock:
+                root._network_operation = child._network_operation = False
+            root._wake.set(); child._wake.set()
+
+    def _forget_account(self, ident, scope):
+        self._root._browser_rpc(ident, {'action':'forget_account', 'account_scope':scope})
+        # A profile can outlive its originating job, so always ask both helpers.
+        self._root.enrichment._browser_rpc(ident, {'action':'forget_account', 'account_scope':scope})
 
     def shodan_account_save(self, payload, ident=None):
         if ident is None:
@@ -593,16 +679,16 @@ class JobManager:
             if self._browser_job: raise RuntimeError('أغلق جلسة المتصفح قبل تعديل حسابات Shodan.')
             username, password, _, previous = self.shodan_accounts.validate(payload, ident)
             if previous and (username, password) != (previous['username'], previous['password']) and self.shodan_accounts.used(ident):
-                self._browser_rpc(ident, {'action':'forget_account','account_scope':previous['scope']})
+                self._forget_account(ident, previous['scope'])
             return self.shodan_accounts.save(payload, ident)
-        return self._vpn_mutation(operation)
+        return self._account_mutation(operation)
 
     def shodan_account_delete(self, ident):
         def operation():
             if self._browser_job: raise RuntimeError('أغلق جلسة المتصفح قبل حذف حساب Shodan.')
             saved = self.shodan_accounts.secret(ident)
             if self.shodan_accounts.used(ident):
-                self._browser_rpc(ident, {'action':'forget_account','account_scope':saved['scope']})
+                self._forget_account(ident, saved['scope'])
             self.shodan_accounts.delete(ident)
             with self.store.connection() as con:
                 jobs = [row[0] for row in con.execute('SELECT id FROM jobs')]
@@ -611,8 +697,9 @@ class JobManager:
                 if job.get('shodan_account_id') == ident:
                     self.store.update_job(job_id, shodan_account_id=None, browser_session_enabled=False)
             return {'deleted':True}
-        return self._vpn_mutation(operation)
+        return self._account_mutation(operation)
 
+    @in_job_lane
     def shodan_account_select(self, job_id, payload):
         if not isinstance(payload,dict) or set(payload)!={'account_id'}:raise ValueError('اختر حساب Shodan صالحًا.')
         def operation():
@@ -657,6 +744,7 @@ class JobManager:
         self.vpn.audit('shodan_login',job_id=job['id'],status='submitted' if result.get('login_status')=='submitted' else 'verification_required')
         return result
 
+    @in_job_lane
     def browser_policy(self, job_id, payload):
         if not isinstance(payload, dict) or set(payload) != {'browser_recovery'} or payload['browser_recovery'] not in ('manual', 'on_challenge'):
             raise JobValidationError('اختر سياسة استرداد المتصفح المدعومة.')
@@ -716,6 +804,7 @@ class JobManager:
                               browser_backend=result.get('backend', 'chromium'))
         return result
 
+    @in_job_lane
     def browser_action(self, job_id, payload):
         if not isinstance(payload,dict) or payload.get('action') not in {'start','stop','frame','click','key','text','scroll','verify','login'}:
             raise ValueError('طلب المتصفح غير صالح.')
@@ -799,6 +888,7 @@ class JobManager:
                 return None
         return recovered
 
+    @in_job_lane
     def _execute(self, job):
         if job.get('network_mode', 'direct') == 'direct':
             self.store.update_job(job['id'], **self.vpn.prepare(job))
@@ -838,6 +928,7 @@ class JobManager:
             prepared = self._recover_vpn(self._get(job['id']))
             if not prepared: return
 
+    @in_job_lane
     def _execute_worker(self, job):
         job_id, path = job["id"], self._path(job["id"])
         with self._lock:
@@ -863,11 +954,12 @@ class JobManager:
                 return
         env = os.environ.copy()
         env.pop("SHODAN_API_KEY", None)
+        env["SHODAN_STUDIO_EXECUTION_SPACE"] = self.kind
         env["PYTHONUNBUFFERED"] = "1"
         env["PYTHONDONTWRITEBYTECODE"] = "1"
         command = [sys.executable, "-m", "studio.worker", "--job-dir", str(path)]
         if job.get("network_mode", "direct") != "direct":
-            command = [sys.executable, "-m", "studio.vpn_client", "--job-id", job_id]
+            command = [sys.executable, "-m", "studio.vpn_client", "--job-id", job_id, "--kind", self.kind]
         # No shell, user-controlled executable, credential argv, or target URL.
         process = subprocess.Popen(command, cwd=Path(__file__).resolve().parent.parent,
                                    stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -1132,6 +1224,7 @@ class JobManager:
                 raise JobValidationError("تعذر التحقق من حالة نقطة الاستكمال؛ لم تُرسل أي طلبات خارجية.") from None
 
     def _import_enrichment_checkpoint(self, checkpoint, payload):
+        if self.kind != 'enrichment': return self.enrichment._import_enrichment_checkpoint(checkpoint, payload)
         from .enrichment import validate_checkpoint
         validate_checkpoint(checkpoint)
         cfg = checkpoint['config']
@@ -1153,7 +1246,7 @@ class JobManager:
             self.store.append_event(job['id'], {'kind': 'state', 'status': 'paused', 'message': 'استُوردت مهمة الإثراء؛ راجع الاتصال والمصدر ثم استكمل.'})
             return self.get_job(job['id'])
 
-    def shutdown(self):
+    def _request_shutdown(self):
         self._stop.set()
         self._wake.set()
         with self._lock:
@@ -1162,6 +1255,12 @@ class JobManager:
                 self._control(active, "pause")
                 if self._get(active)["status"] == "running":
                     self.store.update_job(active, status="pause_requested")
+    def shutdown(self):
+        lanes = (self, self.enrichment) if self is self._root else (self,)
+        for lane in lanes: lane._request_shutdown()
+        for lane in reversed(lanes): lane._finish_shutdown()
+
+    def _finish_shutdown(self):
         thread = self._thread
         if thread and thread is not threading.current_thread():
             thread.join(timeout=35)
@@ -1179,8 +1278,9 @@ class JobManager:
         if thread and thread.is_alive() and thread is not threading.current_thread():
             thread.join(timeout=5)
         with self._lock:
-            self._keys.clear()
-            self._secret_history.clear()
+            if self is self._root:
+                self._keys.clear()
+                self._secret_history.clear()
             if self._ownership:
                 fcntl.flock(self._ownership, fcntl.LOCK_UN)
                 self._ownership.close()

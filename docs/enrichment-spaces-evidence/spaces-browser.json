@@ -1,0 +1,20 @@
+{
+  "fixture": true,
+  "externalRequests": 0,
+  "concurrentStatusesSimulated": true,
+  "backendConcurrency": "test_execution_spaces.py uses two real offline worker processes",
+  "routes": [
+    "/extraction",
+    "/enrichment"
+  ],
+  "widths": [
+    375,
+    1280
+  ],
+  "keyboard": true,
+  "independentTables": true,
+  "reload": true,
+  "vpnSpaceSelector": true,
+  "axeViolations": 0,
+  "errors": []
+}

@@ -1,0 +1,16 @@
+.....................................................................................................................................................[SOURCE] API -> HTML; keeping cached planning pages and 1 unique IPs.
+Warning [SOURCE_CHANGED] Continuing with a different source; cached facets retain their original snapshot and coverage limits. | facet=source
+..[SOURCE] API -> HTML; keeping cached planning pages and 98 unique IPs.
+Warning [SOURCE_CHANGED] Continuing with a different source; cached facets retain their original snapshot and coverage limits. | facet=source
+.[SOURCE] API -> HTML; keeping cached planning pages and 100 unique IPs.
+Warning [SOURCE_CHANGED] Continuing with a different source; cached facets retain their original snapshot and coverage limits. | facet=source
+[SOURCE] API -> HTML; keeping cached planning pages and 100 unique IPs.
+Warning [SOURCE_CHANGED] Continuing with a different source; cached facets retain their original snapshot and coverage limits. | facet=source
+................................................................[1/500] PORT | fixture
+[1/500] PORT | fixture
+[1/500] PORT | fixture
+....................................................................................................................................................
+----------------------------------------------------------------------
+Ran 364 tests in 348.211s
+
+OK

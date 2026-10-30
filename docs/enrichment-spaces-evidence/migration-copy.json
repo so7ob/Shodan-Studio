@@ -1,0 +1,31 @@
+{
+  "at": "2026-10-30T00:33:25.603411+00:00",
+  "copied_live_database": true,
+  "backup_private": true,
+  "schedulers_disabled": true,
+  "externalRequests": 0,
+  "before": {
+    "jobs": 22,
+    "job_ips": 2107,
+    "targets": 1463,
+    "target_discoveries": 2165,
+    "target_snapshots": 0,
+    "target_services": 0,
+    "enrichment_items": 1464,
+    "users": 1,
+    "shodan_accounts": 1
+  },
+  "after": {
+    "jobs": 22,
+    "job_ips": 2107,
+    "targets": 1463,
+    "target_discoveries": 2165,
+    "target_snapshots": 0,
+    "target_services": 0,
+    "enrichment_items": 1464,
+    "users": 1,
+    "shodan_accounts": 1
+  },
+  "job_contracts_preserved": true,
+  "sqlite_integrity": "ok"
+}

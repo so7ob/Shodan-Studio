@@ -13,7 +13,7 @@ def main():
     parser = argparse.ArgumentParser(); parser.add_argument('--port', type=int, default=8813); args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix='studio-targets-fixture-') as folder:
         app = create_app(folder, allowed_hosts=[f'127.0.0.1:{args.port}'], demo=True, autostart=False)
-        m = app.manager; m.vpn.provider = FakeProvider()
+        m = app.manager; m.vpn.provider = FakeProvider(); m.enrichment.vpn.provider = FakeProvider()
         m.store.setup(m.store.setup_token(), 'acceptance', 'local-browser-fixture-123!')
         a = m.create_job({'title': 'Inventory fixture A', 'query': 'fixture product:nginx'})
         b = m.create_job({'title': 'Inventory fixture B', 'query': 'fixture port:53'})

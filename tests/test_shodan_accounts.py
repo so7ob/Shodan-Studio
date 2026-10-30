@@ -148,8 +148,10 @@ class AccountManagerTests(unittest.TestCase):
     def test_delete_removes_saved_browser_scopes_and_unlinks_jobs(self):
         self.select();vault=self.manager.shodan_accounts;vault.mark_used(self.account['id'])
         scope=vault.secret(self.account['id'])['scope'];self.manager._browser_rpc=MagicMock(return_value={'removed':True})
+        self.manager.enrichment._browser_rpc=MagicMock(return_value={'removed':True})
         self.manager.shodan_account_delete(self.account['id'])
         self.manager._browser_rpc.assert_called_once_with(self.account['id'],{'action':'forget_account','account_scope':scope})
+        self.manager.enrichment._browser_rpc.assert_called_once_with(self.account['id'],{'action':'forget_account','account_scope':scope})
         self.assertIsNone(self.store.get_job(self.job['id']).get('shodan_account_id'));self.assertEqual(vault.list(),[])
     def test_failover_browser_input_keeps_account_scope(self):
         self.select();job=self.store.get_job(self.job['id'])

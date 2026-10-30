@@ -1,0 +1,41 @@
+✔ example 512 of estimated 782 displays 65% (4.399087ms)
+✔ no estimate is not presented as zero percent or 100% (0.19269ms)
+✔ source records give provisional numeric progress while unique total is unknown (0.344125ms)
+✔ completed zero-IP job can show 100% without fabricated totals (0.218098ms)
+✔ error condition with known count remains estimated (0.156408ms)
+✔ large numbers formatted safely (0.155351ms)
+✔ invalid percent is treated as unknown (0.226891ms)
+✔ rounding or malformed payload cannot display 100 before success (0.271473ms)
+✔ missing progress never falls back to a branch percentage (0.384774ms)
+✔ render creates accessible determinate progressbar (0.776718ms)
+✔ render unknown estimate as non-numeric status (0.310546ms)
+✔ compact list retains secondary branch counts and safely renders text (0.185531ms)
+✔ enrichment progress counts processed targets and keeps outcomes separate (0.17093ms)
+✔ persisted future deadline survives a cloned/reloaded job and is explicit (3.463761ms)
+✔ expired deadline remains visible without promising acceptance or automatic resume (0.598799ms)
+✔ unbounded wait takes precedence even if an old deadline has elapsed (0.171932ms)
+✔ invalid deadlines never become an expired wait (0.660932ms)
+✔ countdown and guidance share validation with unbounded-hold precedence (0.213867ms)
+✔ missing checkpoint is not described as a saved restart point (0.165075ms)
+✔ access refusals explain manual review without claiming a retry solves access (0.306759ms)
+✔ technical markup stays a literal string for textContent rendering (0.273605ms)
+✔ layout errors never ask the user to solve a security challenge (0.482497ms)
+✔ login and permission guidance are distinct from a detected challenge (0.800843ms)
+✔ view model does not mutate saved state or require browser/network globals (0.317566ms)
+✔ request delay counts down from an absolute deadline across refreshes (0.632474ms)
+✔ server clock ignores browser skew, wall clock changes and page reloads (0.699746ms)
+✔ clock rejects invalid, stale and slow response samples (0.170767ms)
+✔ configured interval stays visible between waits and never resets a countdown (0.216355ms)
+✔ rate limit deadline takes precedence and is distinct from ordinary pacing (0.596187ms)
+✔ host lookup results report services independently of discovery counts (32.26561ms)
+✔ request results distinguish records, page items and newly stored unique IPs (0.517386ms)
+✔ missing historic data is not zero, and a saved snapshot is not a new request (0.233989ms)
+✔ security, login, throttling and ambiguous attempts remain distinct (0.493134ms)
+ℹ tests 33
+ℹ suites 0
+ℹ pass 33
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 125.016008

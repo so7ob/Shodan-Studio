@@ -1,3 +1,21 @@
+## Independent execution spaces — Issue #35 (2026-10-30)
+
+- Python: **364 passed**, no skips, including two simultaneous real offline
+  workers, live discovery seeding before extraction finishes, per-kind claims,
+  independent VPN/browser control, shared-account exclusion, restart/checkpoint
+  compatibility and host page verification. [Log](docs/enrichment-spaces-evidence/python-tests.txt).
+- JavaScript: **33 passed**, no skips. [Log](docs/enrichment-spaces-evidence/node-tests.txt).
+- Browser: `/extraction` and `/enrichment`, RTL 375/1280, keyboard, reload,
+  separate tables, VPN/diagnostics space selection, zero axe violations.
+  [Report](docs/enrichment-spaces-evidence/spaces-browser.json).
+  Inventory/dialog regressions also passed; [report](docs/enrichment-spaces-evidence/browser.json).
+- Live database copy: 22 jobs, 1463 targets, 2107 IP links, 2165 discovery rows;
+  all retained, contracts unchanged, integrity `ok`. Schedulers were disabled
+  and no external requests were made. [Report](docs/enrichment-spaces-evidence/migration-copy.json).
+- UI states and host HTML layouts are fixtures; they do not prove live Shodan
+  acceptance. Installation, two live VPN connections and interactive recovery
+  require separate local service evidence. CI evidence is tracked in the pull request linked to #35.
+
 # Shodan Studio 1.1.0 — تحقق مؤشر IP
 
 النتائج الفعلية بتاريخ **2026-10-24** على **Debian 12، Python 3.11.2، systemd 252**.

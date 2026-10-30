@@ -278,6 +278,16 @@ class StudioApp:
                 return self.json_response(self.session_payload(session))
         if not session or not session.get("username"):
             raise HTTPError(401, "سجّل الدخول للمتابعة.", "authentication_required")
+        lane_kind = 'extraction'
+        if path == '/api/enrichment/jobs' or path.startswith('/api/enrichment/jobs/') or path == '/api/enrichment/vpn' or path.startswith('/api/enrichment/vpn/'):
+            lane_kind = 'enrichment'
+            path = '/api/' + path[len('/api/enrichment/'):]
+            if path.startswith('/api/jobs/'):
+                ident = path.split('/')[3]
+                job = self.manager.get_job(ident)
+                if job.get('kind', 'extraction') != 'enrichment':
+                    raise HTTPError(404, 'المهمة غير موجودة في مساحة الإثراء.', 'not_found')
+        lane_manager = self.manager.lane(lane_kind) if lane_kind == 'enrichment' else self.manager
         if path == "/api/logout" and method == "POST":
             session = self.rotate_session(token, None, env, headers)
             return self.json_response(self.session_payload(session))
@@ -310,7 +320,7 @@ class StudioApp:
             if match: return self.json_response({'target': self.store.targets.detail(match[1], offset, limit)})
             raise HTTPError(404, 'الهدف غير موجود.', 'not_found')
         if path == "/api/vpn" and method in {"GET", "HEAD"}:
-            return self.json_response(self.manager.vpn.summary())
+            return self.json_response(lane_manager.vpn.summary())
         if path == '/api/shodan/accounts':
             if method in {'GET','HEAD'}:return self.json_response({'accounts':self.manager.shodan_accounts.list()})
             if method == 'POST':return self.json_response({'account':self.manager.shodan_account_save(payload)},201)
@@ -323,20 +333,20 @@ class StudioApp:
         if account_job and method == 'POST':
             return self.json_response({'job':self.manager.shodan_account_select(account_job[1],payload)})
         if path == "/api/vpn/discover" and method in {"GET", "HEAD"}:
-            return self.json_response({"candidates": self.manager.vpn.provider.discover_profiles()})
+            return self.json_response({"candidates": lane_manager.vpn.provider.discover_profiles()})
         if path == "/api/vpn/profiles" and method == "POST":
-            return self.json_response({"profile": self.manager.vpn.add(payload)}, 201)
+            return self.json_response({"profile": lane_manager.vpn.add(payload)}, 201)
         if path == "/api/vpn/actions" and method == "POST":
-            return self.json_response(self.manager.vpn_action(payload))
+            return self.json_response(lane_manager.vpn_action(payload))
         if path == "/api/vpn/premium" and method == "POST":
-            return self.json_response(self.manager.vpn_premium(payload))
+            return self.json_response(lane_manager.vpn_premium(payload))
         if path == "/api/vpn/diagnostics" and method == "POST":
             if set(payload) != {"scope"}:
                 raise ValueError('طلب التشخيص غير صالح.')
-            return self.json_response(self.manager.vpn.diagnostics(payload['scope']))
+            return self.json_response(lane_manager.vpn.diagnostics(payload['scope']))
         vpn_match = re.fullmatch(r"/api/vpn/profiles/([a-f0-9]{32})", path)
         if vpn_match and method == "POST":
-            return self.json_response({"profile": self.manager.vpn_update(vpn_match[1], payload)})
+            return self.json_response({"profile": lane_manager.vpn_update(vpn_match[1], payload)})
         network_match = re.fullmatch(r"/api/jobs/([a-f0-9]{32})/network", path)
         browser_match = re.fullmatch(r"/api/jobs/([a-f0-9]{32})/browser", path)
         browser_policy_match = re.fullmatch(r"/api/jobs/([a-f0-9]{32})/browser-policy", path)
@@ -348,7 +358,11 @@ class StudioApp:
             return self.json_response({"job": self.manager.network_settings(network_match[1], payload)})
         if path == "/api/jobs":
             if method in {"GET", "HEAD"}:
-                return self.json_response(self.manager.list_jobs())
+                result = self.manager.list_jobs(kind='enrichment') if lane_kind == 'enrichment' else self.manager.list_jobs()
+                return self.json_response(result)
+            if lane_kind == 'enrichment':
+                if payload.get('kind', 'enrichment') != 'enrichment': raise ValueError('نوع مهمة الإثراء غير صالح.')
+                payload = {**payload, 'kind': 'enrichment'}
             return self.json_response({"job": self.manager.create_job(payload)}, 201)
         if path == "/api/checkpoints/import" and method == "POST":
             return self.json_response({"job": self.manager.import_checkpoint(payload)}, 201)
@@ -416,6 +430,8 @@ class StudioApp:
         files = {
             "/": ("index.html", "text/html; charset=utf-8"),
             "/index.html": ("index.html", "text/html; charset=utf-8"),
+            "/enrichment": ("index.html", "text/html; charset=utf-8"),
+            "/extraction": ("index.html", "text/html; charset=utf-8"),
             "/app.js": ("app.js", "text/javascript; charset=utf-8"),
             "/app.css": ("app.css", "text/css; charset=utf-8"),
             "/static/app.js": ("app.js", "text/javascript; charset=utf-8"),

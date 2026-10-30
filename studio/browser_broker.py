@@ -12,6 +12,7 @@ import time
 
 from .browser_session import resource_url as facet_url
 from .vpn_config import profile_id
+from .lanes import Space
 
 ROOT = Path('/var/lib/shodan-studio-browser')
 MAX_REPLY = 12 * 1024 * 1024
@@ -45,6 +46,11 @@ class BrowserBroker:
         self.backend=browser_backend()
         self.identity={}
         self.account_scope=None
+
+    @property
+    def root(self):
+        selected = getattr(self.broker, 'space', None)
+        return Path(selected.browser) if isinstance(selected, Space) else ROOT
 
     def status(self):
         alive=bool(self.process and self.process.poll() is None)
@@ -111,12 +117,12 @@ class BrowserBroker:
         elif not Path('/usr/lib/chromium/chromium').is_file():
             raise RuntimeError('Install the optional Chromium browser dependency.')
         if not Path('/usr/bin/Xvfb').is_file():raise RuntimeError('Install the optional Xvfb browser dependency.')
-        if shutil.disk_usage(ROOT).free<200*1024*1024:raise RuntimeError('Browser requires at least 200 MiB free disk space.')
+        if shutil.disk_usage(self.root).free<200*1024*1024:raise RuntimeError('Browser requires at least 200 MiB free disk space.')
         if not self.broker.launch_check().get('healthy'):raise RuntimeError('تحقق من اتصال VPN قبل فتح المتصفح.')
         self.profile=profile_id(self.broker.active)
         self.account_scope=account_scope
         namespace='account-'+account_scope if account_scope else self.profile
-        folder=ROOT/(namespace + ('-patchright' if self.backend == 'patchright' else ''))
+        folder=self.root/(namespace + ('-patchright' if self.backend == 'patchright' else ''))
         if folder.is_symlink():raise ValueError('Invalid browser profile directory.')
         folder.mkdir(mode=0o700,exist_ok=True);os.chown(folder,account.pw_uid,account.pw_gid);folder.chmod(0o700)
         # Additional browser-only egress guard. Browser pages cannot reach host,
@@ -147,7 +153,7 @@ class BrowserBroker:
             scope=profile_id(data['account_scope'])
             if self.account_scope==scope and self.status()['running']:raise RuntimeError('أغلق جلسة حساب Shodan قبل حذفه.')
             for suffix in ('','-patchright'):
-                folder=ROOT/('account-'+scope+suffix)
+                folder=self.root/('account-'+scope+suffix)
                 if folder.is_symlink():raise ValueError('Invalid account browser directory.')
                 if folder.exists():shutil.rmtree(folder)
             return {'removed':True}
